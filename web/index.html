@@ -43,8 +43,8 @@ tr.mine td{background:color-mix(in srgb,var(--good) 18%,transparent)}
   <section class="card">
     <h2>📊 How am I doing?</h2>
     <div class="row">
-      <input id="myMark" type="number" min="0" max="100" step="0.01" placeholder="Your mark (out of 100)">
-      <input id="myReg" placeholder="…or registration no. (e.g. IT 25 1017 94)">
+      <input id="myMark" type="number" min="0" max="100" step="any" placeholder="Your mark (out of 100)" style="flex:1;min-width:180px">
+      <input id="myReg" type="text" placeholder="…or registration no. (e.g. IT 25 1017 94)" style="flex:1;min-width:220px">
       <button id="go">Analyze</button>
       <button class="ghost" id="clear">Clear</button>
     </div>
@@ -58,7 +58,9 @@ tr.mine td{background:color-mix(in srgb,var(--good) 18%,transparent)}
   </section>
 
   <section class="card">
-    <h2>Browse &amp; search</h2>
+    <h2>Browse &amp; search
+      <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">click a row to analyse</span>
+    </h2>
     <div class="row" style="margin-bottom:10px">
       <input id="q" placeholder="Search name or registration no…" style="flex:1;min-width:220px">
       <select id="batch"></select>
@@ -212,12 +214,13 @@ document.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => {
 });
 
 // ---- "How am I doing?" -------------------------------------------------
-function analyze() {
-  let mark = parseFloat($("myMark").value), me = null;
+function analyze(markOverride, meOverride) {
+  let mark = markOverride != null ? markOverride : parseFloat($("myMark").value);
+  let me = meOverride || null;
   const reg = $("myReg").value.trim().toLowerCase().replace(/\s+/g, "");
-  if (reg) {
+  if (!meOverride && reg) {
     me = all.find(r => r.reg.toLowerCase().replace(/\s+/g, "") === reg);
-    if (!me) return show(`<p>No student found with that registration number.</p>`);
+    if (!me) return show(`<p class="muted">No student found matching <b>${$("myReg").value.trim()}</b>. Leave the reg. no. empty if you only want to analyze by mark.</p>`);
     if (me.mark == null) return show(`<p>Your entry has no mark (absent/blank).</p>`);
     mark = me.mark; $("myMark").value = mark;
   }
@@ -280,12 +283,31 @@ function analyze() {
   state.grade = grade; state.page = 0; drawTable();
 }
 function show(html) { $("insights").classList.remove("hidden"); $("insights").innerHTML = html; }
-$("go").onclick = analyze;
-$("myMark").onkeydown = $("myReg").onkeydown = e => e.key === "Enter" && analyze();
+$("go").onclick = () => analyze();
+$("myMark").addEventListener("keydown", e => { if (e.key === "Enter") analyze(); });
+$("myReg").addEventListener("keydown", e => { if (e.key === "Enter") analyze(); });
 $("clear").onclick = () => {
-  $("myMark").value = $("myReg").value = ""; $("insights").classList.add("hidden");
-  state.mine = null; state.grade = "All"; drawBars(); drawTable();
+  $("myMark").value = $("myReg").value = "";
+  $("insights").classList.add("hidden");
+  state.mine = null;
+  state.grade = "All";
+  drawBars();
+  drawTable();
 };
+
+// ---- Click a table row to auto-analyse ---------------------------------
+$("rows").addEventListener("click", e => {
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  const regCell = tr.cells[1]?.textContent?.trim();
+  const markCell = parseFloat(tr.cells[3]?.textContent);
+  if (!regCell || regCell === "–") return;
+  $("myReg").value = regCell;
+  if (!isNaN(markCell)) { $("myMark").value = markCell; }
+  const me = all.find(r => r.reg === regCell);
+  analyze(me?.mark ?? markCell, me || null);
+  $("insights").scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
 drawTable();
 </script>
 </body>

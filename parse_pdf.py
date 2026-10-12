@@ -140,7 +140,7 @@ def main():
     ap.add_argument("--subject-code", help="override subject code (e.g. IT2011, SE2020)")
     ap.add_argument("--subject-title", help="override subject title (e.g. 'Software Engineering')")
     ap.add_argument("--exam-type", help="override assessment type (e.g. 'Midterm', 'Final')")
-    ap.add_argument("--weightage", help="override weightage (e.g. '20%')")
+    ap.add_argument("--weightage", help="override weightage (e.g. 20%%)")
     args = ap.parse_args()
 
     overrides = {

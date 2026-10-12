@@ -68,3 +68,39 @@ def test_metadata_override():
     assert meta["subject_title"] == "Data Structures"
     # Non-overridden fields should still come from auto-detection
     assert meta["exam_type"] == "Midterm"
+
+
+def test_row_format_b_with_grade_status():
+    from parse_pdf import ROW_B
+    m = ROW_B.match("1 IT 23 1724 32 66.6 C Pass")
+    assert m is not None
+    assert m.group("idx") == "1"
+    assert m.group("reg") == "IT 23 1724 32"
+    assert float(m.group("mark")) == 66.6
+    assert m.group("grade") == "C"
+    assert m.group("status") == "Pass"
+
+
+def test_row_format_b_repeat_and_zero():
+    from parse_pdf import ROW_B
+    m1 = ROW_B.match("2663 IT 25 1040 97 89.1 R Fail")
+    assert m1 and m1.group("grade") == "R" and m1.group("status") == "Fail"
+
+    m2 = ROW_B.match("13 IT 24 1019 48 0 E Fail")
+    assert m2 and float(m2.group("mark")) == 0.0 and m2.group("grade") == "E"
+
+
+def test_metadata_final_exam_format():
+    header = (
+        "Sri Lanka Institute of Information Technology\n"
+        "IT1170 - Data Structures and Algorithms\n"
+        "All - Institute All - Specialization All - Regular\n"
+        "Unofficial Final Grades (Official grades will be available through student profiles after the BOE)\n"
+        "Examination Type :- General Examination - 2026\n"
+        "No Registration No CA Marks Grade Status\n"
+    )
+    meta = extract_metadata(header, Path("IT1170_Final.pdf"))
+    assert meta["subject_code"] == "IT1170"
+    assert meta["subject_title"] == "Data Structures and Algorithms"
+    assert meta["exam_type"] in ("Final", "General Examination")
+    assert meta["year"] == "2026"

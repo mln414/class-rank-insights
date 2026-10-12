@@ -212,7 +212,7 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
           <th data-k="rank">Rank</th>
           <th data-k="topPct">Top %</th>
           <th data-k="reg">Reg. No</th>
-          <th data-k="name">Name</th>
+          <th data-k="name" id="thName">Name</th>
           <th data-k="mark" class="num">Mark (/100)</th>
           <th data-k="score" class="num" id="colGradeOrScore">Weighted Score</th>
         </tr></thead>
@@ -253,9 +253,11 @@ const GRADES = [
 ];
 
 function isMidtermAssessment(meta) {
-  if (!meta) return true;
+  if (!meta) return false;
+  if (meta.is_final) return false;
   const exam = (meta.exam_type || "").toLowerCase();
   const weight = (meta.weightage || "").trim();
+  if (exam.includes("final") || exam.includes("general")) return false;
   if (exam.includes("mid") || exam.includes("test") || exam.includes("quiz") || exam.includes("assignment")) return true;
   if (weight && weight !== "100%" && weight !== "100") return true;
   return false;
@@ -287,17 +289,24 @@ function extractMetadata(firstPageLines, fileName = "") {
     exam_type: "Assessment",
     year: "",
     max_mark: 100.0,
-    weightage: "20%"
+    weightage: ""
   };
 
   const subjP1 = /^(.+?)\s*-\s*([A-Z]{2,4}\s*\d{4})\s*$/i;
   const subjP2 = /^([A-Z]{2,4}\s*\d{4})\s*-\s*(.+?)\s*$/i;
-  const examYearP = /^([A-Za-z0-9\s]+?)\s*-\s*(\d{4})\s*$/i;
+  const examYearP = /^(?:Examination\s*Type\s*:-\s*)?([A-Za-z0-9\s]+?)\s*-\s*(\d{4})\s*$/i;
   const maxWeightP = /Out of\s+(\d+)(?:\s*\(\s*([^)]+)\s*\))?/i;
 
-  for (let i = 0; i < Math.min(18, firstPageLines.length); i++) {
+  for (let i = 0; i < Math.min(25, firstPageLines.length); i++) {
     const line = firstPageLines[i].trim();
     if (!line) continue;
+
+    if (/final\s*grades/i.test(line)) {
+      meta.is_final = true;
+      if (!meta.exam_type || meta.exam_type === "Assessment") {
+        meta.exam_type = "Final";
+      }
+    }
 
     const m1 = subjP1.exec(line);
     if (m1 && !meta.subject_code) {
@@ -336,7 +345,7 @@ function extractMetadata(firstPageLines, fileName = "") {
   if (!meta.subject_title && meta.subject_code) {
     meta.subject_title = meta.subject_code;
   }
-  if (fileName && fileName.toLowerCase().includes("mid") && meta.exam_type === "Assessment") {
+  if (fileName && fileName.toLowerCase().includes("mid") && (meta.exam_type === "Assessment" || !meta.exam_type)) {
     meta.exam_type = "Midterm";
   }
 
@@ -393,31 +402,69 @@ async function parsePdfFile(file, isAnonymize = false, onProgress = null) {
 
   const metadata = extractMetadata(firstPageLines, file.name);
 
-  // Student row regex:
-  // e.g. "1,234 IT 25 1017 94 Jayasundara R.H. 82.66 16.532"
-  const rowRegex = /^([\d,]+)\s+([A-Z]{2,4}\s\d{2}\s\d{4}\s\d{2})\s+(.+?)(?:\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?))?\s*$/;
+  // Multi-format row regexes:
+  // Format B (No name column: No, Reg, Mark, Grade, Status): e.g. "1 IT 23 1724 32 66.6 C Pass"
+  const rowRegexB = /^([\d,]+)\s+([A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+(\d+(?:\.\d+)?|-)\s+([A-Z][+-]?|[A-Z]{1,2})(?:\s+(Pass|Fail))?\s*$/i;
+  // Format B without mark (absent): e.g. "13 IT 24 1019 48 E Fail"
+  const rowRegexB_noMark = /^([\d,]+)\s+([A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+([A-Z][+-]?|[A-Z]{1,2})\s+(Pass|Fail)\s*$/i;
+  // Format C (With name, mark, grade, status): e.g. "1 IT 23 1724 32 Silva A. 66.6 C Pass"
+  const rowRegexC = /^([\d,]+)\s+([A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+(.+?)\s+(\d+(?:\.\d+)?|-)\s+([A-Z][+-]?|[A-Z]{1,2})(?:\s+(Pass|Fail))?\s*$/i;
+  // Format A (With name, mark, score): e.g. "1,234 IT 25 1017 94 Jayasundara R.H. 82.66 16.532"
+  const rowRegexA = /^([\d,]+)\s+([A-Z]{2,4}\s\d{2}\s\d{4}\s\d{2})\s+(.+?)(?:\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?))?\s*$/;
 
   const records = [];
   for (const line of allLines) {
-    const m = rowRegex.exec(line.trim());
-    if (!m) continue;
+    const l = line.trim();
+    let idx, reg, name = "", mark = null, score = null, grade = null, status = null;
 
-    const idx = parseInt(m[1].replace(/,/g, ""), 10);
-    let reg = m[2];
-    let name = m[3].trim();
-    const mark = m[4] !== undefined ? parseFloat(m[4]) : null;
-    const score = m[5] !== undefined ? parseFloat(m[5]) : null;
+    const mb = rowRegexB.exec(l);
+    if (mb) {
+      idx = parseInt(mb[1].replace(/,/g, ""), 10);
+      reg = mb[2];
+      mark = mb[3] !== "-" ? parseFloat(mb[3]) : null;
+      grade = mb[4].toUpperCase();
+      status = mb[5] || null;
+    } else {
+      const mbNo = rowRegexB_noMark.exec(l);
+      if (mbNo) {
+        idx = parseInt(mbNo[1].replace(/,/g, ""), 10);
+        reg = mbNo[2];
+        grade = mbNo[3].toUpperCase();
+        status = mbNo[4] || null;
+      } else {
+        const mc = rowRegexC.exec(l);
+        if (mc) {
+          idx = parseInt(mc[1].replace(/,/g, ""), 10);
+          reg = mc[2];
+          name = mc[3].trim();
+          mark = mc[4] !== "-" ? parseFloat(mc[4]) : null;
+          grade = mc[5].toUpperCase();
+          status = mc[6] || null;
+        } else {
+          const ma = rowRegexA.exec(l);
+          if (ma) {
+            idx = parseInt(ma[1].replace(/,/g, ""), 10);
+            reg = ma[2];
+            name = ma[3].trim();
+            mark = ma[4] !== undefined ? parseFloat(ma[4]) : null;
+            score = ma[5] !== undefined ? parseFloat(ma[5]) : null;
+          } else {
+            continue;
+          }
+        }
+      }
+    }
 
     const parts = reg.split(/\s+/);
     const batch = parts.length > 1 && /^\d+$/.test(parts[1]) ? `20${parts[1]}` : "Unknown";
     const degree = parts[0] || "Unknown";
 
     if (isAnonymize) {
-      name = `Student ${idx}`;
+      name = name ? `Student ${idx}` : "";
       reg = reg.slice(0, 6) + " ** **";
     }
 
-    records.push({ no: idx, reg, batch, degree, name, mark, score });
+    records.push({ no: idx, reg, batch, degree, name, mark, score, grade, status });
   }
 
   return { metadata, records };
@@ -463,7 +510,7 @@ function loadDataset(dataset) {
 
   all.forEach(r => {
     r.band = bandOf(r.mark);
-    r.grade = isMidterm ? null : gradeOf(r.mark);
+    r.grade = isMidterm ? null : (r.grade || gradeOf(r.mark));
     if (r.mark != null && r.score == null) {
       r.score = +(r.mark * weightNum / 100).toFixed(2);
     }
@@ -527,7 +574,9 @@ function loadDataset(dataset) {
 
 function drawBars(myCategory) {
   const isMidterm = isMidtermAssessment(currentDataset?.metadata);
-  const items = isMidterm ? BANDS.map(b => b.label) : GRADES.map(g => g[0]);
+  const items = isMidterm
+    ? BANDS.map(b => b.label)
+    : [...new Set([...GRADES.map(g => g[0]), ...Object.keys(counts)])].filter(Boolean);
   const max = Math.max(...Object.values(counts), 1);
 
   $("bars").innerHTML = items.map(cat => {
@@ -545,7 +594,7 @@ function drawChips() {
   const isMidterm = isMidtermAssessment(currentDataset?.metadata);
   const items = isMidterm
     ? ["All", ...BANDS.map(b => b.label), "Absent"]
-    : ["All", ...GRADES.map(g => g[0]), "Absent"];
+    : ["All", ...[...new Set([...GRADES.map(g => g[0]), ...Object.keys(counts)])].filter(Boolean), "Absent"];
 
   $("gradeChips").innerHTML = items.map(cat => {
     const c = cat === "All"
@@ -587,6 +636,10 @@ function filtered() {
 }
 
 function drawTable() {
+  const allRecords = currentDataset ? currentDataset.records : [];
+  const hasNames = allRecords.some(r => r.name && r.name !== "–" && r.name !== "-");
+  if ($("thName")) $("thName").textContent = hasNames ? "Name" : "Status";
+
   const isMidterm = isMidtermAssessment(currentDataset?.metadata);
   const weightNum = parseFloat(currentDataset?.metadata?.weightage) || 20;
   const weightLabel = currentDataset?.metadata?.weightage || `${weightNum}%`;
@@ -606,11 +659,18 @@ function drawTable() {
       ? `<span class="pill" style="font-size:11px;font-weight:600">Top ${pct(r.topPct)}</span>`
       : `<span class="muted">–</span>`;
 
+    const statusBadge = r.status
+      ? `<span class="pill" style="font-size:11px;font-weight:600;margin-left:4px;${r.status === 'Pass' ? 'color:#10b981;border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.08)' : 'color:#ef4444;border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)'}">${r.status}</span>`
+      : "";
+    const nameCell = hasNames
+      ? `${r.name || "–"}${statusBadge}`
+      : (statusBadge || "–");
+
     return `<tr class="${r === state.mine ? "mine" : ""}">
       <td>${r.rank ?? "–"}</td>
       <td>${topPctBadge}</td>
       <td>${r.reg}</td>
-      <td>${r.name}</td>
+      <td>${nameCell}</td>
       <td class="num">${r.mark ?? "–"}</td>
       <td class="num"><span class="pill ${r.mark == null ? 'muted' : ''}">${pillContent}</span></td>
     </tr>`;
@@ -667,7 +727,7 @@ function analyze(markOverride, meOverride) {
   const topPct = rank / n;
   const beatPct = below / n;
 
-  const userCat = isMidterm ? bandOf(mark) : gradeOf(mark);
+  const userCat = isMidterm ? bandOf(mark) : (me?.grade || gradeOf(mark));
   const inCat = counts[userCat] || 0;
   const near = marks.filter(m => Math.abs(m - mark) <= 2).length;
   const diff = mark - mean;
@@ -677,6 +737,8 @@ function analyze(markOverride, meOverride) {
 
 
   const rankLabel = same > 1 ? `${rank} <span style="font-size:12px;opacity:.7">(tied · ${same} students)</span>` : `${rank}`;
+  const gradeLabel = me?.grade || userCat;
+  const statusLabel = me?.status ? ` <span style="font-size:13px;opacity:.7">(${me.status})</span>` : "";
   const extraBadge = isMidterm
     ? `<div class="hero-badge">
          <span class="hero-badge-label">Contribution</span>
@@ -684,7 +746,7 @@ function analyze(markOverride, meOverride) {
        </div>`
     : `<div class="hero-badge">
          <span class="hero-badge-label">Grade</span>
-         <span class="hero-badge-value">${userCat}</span>
+         <span class="hero-badge-value">${gradeLabel}${statusLabel}</span>
        </div>`;
 
   show(`
@@ -729,8 +791,8 @@ $("clear").onclick = () => {
 $("rows").addEventListener("click", e => {
   const tr = e.target.closest("tr");
   if (!tr) return;
-  const regCell = tr.cells[1]?.textContent?.trim();
-  const markCell = parseFloat(tr.cells[3]?.textContent);
+  const regCell = tr.cells[2]?.textContent?.trim();
+  const markCell = parseFloat(tr.cells[4]?.textContent);
   if (!regCell || regCell === "–") return;
   $("myReg").value = regCell;
   if (!isNaN(markCell)) { $("myMark").value = markCell; }

@@ -17,17 +17,39 @@ from pathlib import Path
 
 import pdfplumber
 
-# Matches student rows across degree codes (IT, SE, CS, BM, etc.):
-# "1,234 IT 25 1017 94 Jayasundara R.H. 82.66 16.532" (absent students omit marks)
-ROW = re.compile(
+# Multi-format row patterns:
+# Format B (No student name: No, Reg, Mark, Grade, Status): e.g. "1 IT 23 1724 32 66.6 C Pass"
+ROW_B = re.compile(
+    r"^(?P<idx>[\d,]+)\s+(?P<reg>[A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+"
+    r"(?P<mark>\d+(?:\.\d+)?|-)\s+(?P<grade>[A-Z][+-]?|[A-Z]{1,2})(?:\s+(?P<status>Pass|Fail))?\s*$",
+    re.I,
+)
+
+# Format B absent without mark: "13 IT 24 1019 48 E Fail"
+ROW_B_NOMARK = re.compile(
+    r"^(?P<idx>[\d,]+)\s+(?P<reg>[A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+"
+    r"(?P<grade>[A-Z][+-]?|[A-Z]{1,2})\s+(?P<status>Pass|Fail)\s*$",
+    re.I,
+)
+
+# Format C (With name, mark, grade, status): e.g. "1 IT 23 1724 32 Silva A. 66.6 C Pass"
+ROW_C = re.compile(
+    r"^(?P<idx>[\d,]+)\s+(?P<reg>[A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+(?P<name>.+?)\s+"
+    r"(?P<mark>\d+(?:\.\d+)?|-)\s+(?P<grade>[A-Z][+-]?|[A-Z]{1,2})(?:\s+(?P<status>Pass|Fail))?\s*$",
+    re.I,
+)
+
+# Format A (Midterm with name, mark, score): e.g. "1,234 IT 25 1017 94 Jayasundara R.H. 82.66 16.532"
+ROW_A = re.compile(
     r"^(?P<idx>[\d,]+)\s+(?P<reg>[A-Z]{2,4}\s\d{2}\s\d{4}\s\d{2})\s+(?P<name>.+?)"
     r"(?:\s+(?P<mark>\d+(?:\.\d+)?)\s+(?P<score>\d+(?:\.\d+)?))?\s*$"
 )
+ROW = ROW_A
 
 # Header patterns commonly found in SLIIT exam sheets
 SUBJECT_PATTERN_1 = re.compile(r"^(?P<title>.+?)\s*-\s*(?P<code>[A-Z]{2,4}\s*\d{4})\s*$", re.I)
 SUBJECT_PATTERN_2 = re.compile(r"^(?P<code>[A-Z]{2,4}\s*\d{4})\s*-\s*(?P<title>.+?)\s*$", re.I)
-EXAM_YEAR_PATTERN = re.compile(r"^(?P<exam>[A-Za-z0-9\s]+?)\s*-\s*(?P<year>\d{4})\s*$", re.I)
+EXAM_YEAR_PATTERN = re.compile(r"^(?:Examination\s*Type\s*:-\s*)?(?P<exam>[A-Za-z0-9\s]+?)\s*-\s*(?P<year>\d{4})\s*$", re.I)
 MAX_WEIGHTAGE_PATTERN = re.compile(r"Out of\s+(?P<max>\d+)(?:\s*\(\s*(?P<weight>[^\)]+)\s*\))?", re.I)
 
 
@@ -39,11 +61,13 @@ def extract_metadata(header_text: str, pdf_path: Path) -> dict:
         "exam_type": "Assessment",
         "year": "",
         "max_mark": 100.0,
-        "weightage": "20%",
+        "weightage": "",
     }
 
     lines = [line.strip() for line in header_text.splitlines() if line.strip()]
-    for line in lines[:15]:
+    for line in lines[:25]:
+        if re.search(r"final\s*grades", line, re.I):
+            meta["exam_type"] = "Final"
         m1 = SUBJECT_PATTERN_1.match(line)
         if m1 and not meta["subject_code"]:
             meta["subject_title"] = m1.group("title").strip()
@@ -99,25 +123,47 @@ def parse(pdf_path: Path, override_meta: dict = None):
 
         for page in pdf.pages:
             for line in (page.extract_text() or "").splitlines():
-                m = ROW.match(line.strip())
+                l = line.strip()
+                mb = ROW_B.match(l)
+                mb_no = ROW_B_NOMARK.match(l) if not mb else None
+                mc = ROW_C.match(l) if not (mb or mb_no) else None
+                ma = ROW_A.match(l) if not (mb or mb_no or mc) else None
+                m = mb or mb_no or mc or ma
                 if not m:
                     continue
-                reg = m["reg"]
+
+                reg = m.group("reg")
                 parts = reg.split()
                 batch = f"20{parts[1]}" if len(parts) > 1 and parts[1].isdigit() else "Unknown"
                 degree = parts[0] if len(parts) > 0 else "Unknown"
 
-                rows.append(
-                    {
-                        "no": int(m["idx"].replace(",", "")),
-                        "reg": reg,
-                        "batch": batch,
-                        "degree": degree,
-                        "name": m["name"].strip(),
-                        "mark": float(m["mark"]) if m["mark"] else None,
-                        "score": float(m["score"]) if m["score"] else None,
-                    }
-                )
+                gd = m.groupdict()
+                name = gd.get("name")
+                name = name.strip() if name else ""
+
+                mark_val = gd.get("mark")
+                mark = float(mark_val) if (mark_val and mark_val != "-") else None
+
+                score_val = gd.get("score")
+                score = float(score_val) if score_val else None
+
+                grade = gd.get("grade")
+                status = gd.get("status")
+
+                item = {
+                    "no": int(m.group("idx").replace(",", "")),
+                    "reg": reg,
+                    "batch": batch,
+                    "degree": degree,
+                    "name": name,
+                    "mark": mark,
+                    "score": score,
+                }
+                if grade:
+                    item["grade"] = grade.strip()
+                if status:
+                    item["status"] = status.strip()
+                rows.append(item)
 
     if override_meta:
         for k, v in override_meta.items():

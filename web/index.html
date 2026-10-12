@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IT2011 Midterm Analyzer</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#667085;--line:#e4e7ec;--accent:#4f46e5;--good:#12b76a;--warn:#f79009;--bad:#f04438}
+@media (prefers-color-scheme:dark){:root{--bg:#10131a;--card:#181c26;--text:#e8eaf0;--muted:#98a2b3;--line:#2a3040;--accent:#818cf8}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
+header{padding:20px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{margin:0;font-size:20px}header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:20px;display:grid;gap:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+.card h2{margin:0 0 12px;font-size:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input,select,button{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+button{background:var(--accent);color:#fff;border:none;cursor:pointer}button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat{padding:12px;border:1px solid var(--line);border-radius:10px}.stat b{display:block;font-size:22px}.stat span{font-size:12px;color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;cursor:pointer}
+.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}.chip small{opacity:.7;margin-left:4px}
+.bars{display:grid;gap:5px}.bar{display:grid;grid-template-columns:36px 1fr 60px;gap:8px;align-items:center;font-size:12px}
+.bar i{display:block;height:14px;border-radius:4px;background:var(--accent);opacity:.55}.bar.me i{opacity:1;background:var(--good)}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+th{cursor:pointer;color:var(--muted);font-weight:600;user-select:none}td.num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}.pill{padding:2px 8px;border-radius:6px;background:var(--bg);border:1px solid var(--line);font-size:12px}
+#insights ul{margin:8px 0 0;padding-left:20px}#insights li{margin:6px 0}
+.hl{font-size:18px;font-weight:600;margin:0 0 8px}.muted{color:var(--muted);font-size:13px}.hidden{display:none}
+tr.mine td{background:color-mix(in srgb,var(--good) 18%,transparent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>IT2011 – Midterm Analyzer</h1>
+  <p id="meta">Loading…</p>
+</header>
+<main>
+  <section class="card">
+    <h2>📊 How am I doing?</h2>
+    <div class="row">
+      <input id="myMark" type="number" min="0" max="100" step="0.01" placeholder="Your mark (out of 100)">
+      <input id="myReg" placeholder="…or registration no. (e.g. IT 25 1017 94)">
+      <button id="go">Analyze</button>
+      <button class="ghost" id="clear">Clear</button>
+    </div>
+    <div id="insights" class="hidden" style="margin-top:16px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Class overview</h2>
+    <div class="stats" id="stats"></div>
+    <div class="bars" id="bars" style="margin-top:16px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Browse &amp; search</h2>
+    <div class="row" style="margin-bottom:10px">
+      <input id="q" placeholder="Search name or registration no…" style="flex:1;min-width:220px">
+      <select id="batch"></select>
+      <label class="muted"><input type="checkbox" id="showAbsent"> include absent/blank</label>
+    </div>
+    <div class="chips" id="gradeChips" style="margin-bottom:12px"></div>
+    <div class="muted" id="count" style="margin-bottom:8px"></div>
+    <div class="tbl"><table>
+      <thead><tr>
+        <th data-k="rank">Rank</th><th data-k="reg">Reg. No</th><th data-k="name">Name</th>
+        <th data-k="mark" class="num">Mark</th><th data-k="grade">Grade</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <div class="row" style="margin-top:12px;justify-content:center">
+      <button class="ghost" id="prev">‹ Prev</button><span id="page" class="muted"></span><button class="ghost" id="next">Next ›</button>
+    </div>
+  </section>
+</main>
+
+<script src="data.js"></script>
+<script>
+// ---- Grade scale (edit to match your course handbook) ------------------
+const GRADES = [
+  ["A+",90],["A",85],["A-",80],["B+",75],["B",70],["B-",65],
+  ["C+",60],["C",55],["C-",50],["D+",45],["D",40],["E",0]
+];
+const gradeOf = m => m == null ? "Absent" : GRADES.find(([,min]) => m >= min)[0];
+const nextGrade = m => { const i = GRADES.findIndex(([,min]) => m >= min); return i > 0 ? GRADES[i-1] : null; };
+
+// ---- Data prep ---------------------------------------------------------
+const all = window.MARKS || [];
+const scored = all.filter(r => r.mark != null).sort((a,b) => b.mark - a.mark);
+// competition ranking: equal marks share a rank
+let last = null, rk = 0;
+scored.forEach((r,i) => { if (r.mark !== last) { rk = i + 1; last = r.mark; } r.rank = rk; });
+all.forEach(r => { r.grade = gradeOf(r.mark); if (r.mark == null) r.rank = null; });
+const marks = scored.map(r => r.mark);
+const mean = marks.reduce((a,b) => a+b, 0) / marks.length;
+const median = marks[Math.floor(marks.length/2)];
+const sd = Math.sqrt(marks.reduce((a,b) => a + (b-mean)**2, 0) / marks.length);
+const pct = (x, f) => (x * 100).toFixed(f ?? 1) + "%";
+const $ = id => document.getElementById(id);
+
+document.title = "IT2011 Midterm Analyzer";
+$("meta").textContent = `${all.length} students · ${scored.length} with marks · ${all.length - scored.length} absent/blank`;
+
+// ---- Overview ----------------------------------------------------------
+$("stats").innerHTML = [
+  ["Students", scored.length], ["Average", mean.toFixed(2)], ["Median", median.toFixed(2)],
+  ["Highest", marks[0]], ["Lowest", marks[marks.length-1]], ["Std dev", sd.toFixed(2)]
+].map(([l,v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+
+const counts = {}; scored.forEach(r => counts[r.grade] = (counts[r.grade]||0) + 1);
+function drawBars(myGrade) {
+  const max = Math.max(...Object.values(counts));
+  $("bars").innerHTML = GRADES.map(([g]) => {
+    const c = counts[g] || 0;
+    return `<div class="bar ${g===myGrade?"me":""}"><b>${g}</b><i style="width:${c/max*100}%"></i><span>${c} (${pct(c/scored.length,0)})</span></div>`;
+  }).join("");
+}
+drawBars();
+
+// ---- Filters & table ---------------------------------------------------
+const state = { grade: "All", batch: "All", q: "", absent: false, sort: "rank", dir: 1, page: 0, mine: null };
+const PAGE = 50;
+
+$("batch").innerHTML = ["All", ...[...new Set(all.map(r => r.batch))].sort()]
+  .map(b => `<option value="${b}">${b === "All" ? "All batches" : "Batch " + b}</option>`).join("");
+function drawChips() {
+  const items = ["All", ...GRADES.map(g => g[0]), "Absent"];
+  $("gradeChips").innerHTML = items.map(g => {
+    const c = g === "All" ? all.length : all.filter(r => r.grade === g).length;
+    return `<button class="chip ${state.grade===g?"on":""}" data-g="${g}">${g}<small>${c}</small></button>`;
+  }).join("");
+}
+function filtered() {
+  const q = state.q.toLowerCase().replace(/\s+/g, "");
+  let rows = all.filter(r =>
+    (state.grade === "All" || r.grade === state.grade) &&
+    (state.batch === "All" || r.batch === state.batch) &&
+    (state.absent || state.grade === "Absent" || r.mark != null) &&
+    (!q || (r.name + r.reg).toLowerCase().replace(/\s+/g, "").includes(q)));
+  const k = state.sort, d = state.dir;
+  rows.sort((a,b) => {
+    let x = a[k], y = b[k];
+    if (k === "grade") { x = a.mark ?? -1; y = b.mark ?? -1; d === 1 && ([x,y] = [y,x]); }
+    if (x == null) return 1; if (y == null) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * d;
+  });
+  return rows;
+}
+function drawTable() {
+  const rows = filtered(), pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  state.page = Math.min(state.page, pages - 1);
+  const slice = rows.slice(state.page * PAGE, (state.page + 1) * PAGE);
+  $("rows").innerHTML = slice.map(r => `<tr class="${r === state.mine ? "mine" : ""}">
+    <td>${r.rank ?? "–"}</td><td>${r.reg}</td><td>${r.name}</td>
+    <td class="num">${r.mark ?? "–"}</td><td><span class="pill">${r.grade}</span></td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
+  $("count").textContent = `${rows.length} result${rows.length === 1 ? "" : "s"}`;
+  $("page").textContent = `Page ${state.page + 1} / ${pages}`;
+  $("prev").disabled = state.page === 0; $("next").disabled = state.page >= pages - 1;
+  drawChips();
+}
+$("gradeChips").onclick = e => { const g = e.target.closest("[data-g]")?.dataset.g; if (g) { state.grade = g; state.page = 0; drawTable(); } };
+$("q").oninput = e => { state.q = e.target.value; state.page = 0; drawTable(); };
+$("batch").onchange = e => { state.batch = e.target.value; state.page = 0; drawTable(); };
+$("showAbsent").onchange = e => { state.absent = e.target.checked; state.page = 0; drawTable(); };
+$("prev").onclick = () => { state.page--; drawTable(); };
+$("next").onclick = () => { state.page++; drawTable(); };
+document.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => {
+  const k = th.dataset.k; state.dir = state.sort === k ? -state.dir : 1; state.sort = k; drawTable();
+});
+
+// ---- "How am I doing?" -------------------------------------------------
+function analyze() {
+  let mark = parseFloat($("myMark").value), me = null;
+  const reg = $("myReg").value.trim().toLowerCase().replace(/\s+/g, "");
+  if (reg) {
+    me = all.find(r => r.reg.toLowerCase().replace(/\s+/g, "") === reg);
+    if (!me) return show(`<p>No student found with that registration number.</p>`);
+    if (me.mark == null) return show(`<p>Your entry has no mark (absent/blank).</p>`);
+    mark = me.mark; $("myMark").value = mark;
+  }
+  if (isNaN(mark) || mark < 0 || mark > 100) return show(`<p>Enter a mark between 0 and 100.</p>`);
+
+  const grade = gradeOf(mark), n = scored.length;
+  const higher = marks.filter(m => m > mark).length;
+  const same = marks.filter(m => m === mark).length;
+  const rank = higher + 1;
+  const below = marks.filter(m => m < mark).length;
+  const topPct = rank / n;                    // "top X%"
+  const beatPct = below / n;                  // percentile
+  const inGrade = counts[grade] || 0;
+  const near = marks.filter(m => Math.abs(m - mark) <= 2).length;
+  const z = (mark - mean) / sd;
+  const diff = mark - mean;
+  state.mine = me; state.mine = me || all.find(r => r.mark === mark) || null;
+
+  const ng = nextGrade(mark), above = marks.filter(m => m > mark);
+  const peersAbove = ng ? marks.filter(m => m >= ng[1]).length : 0;
+  const lines = [];
+  const standing = topPct <= .1 ? "Excellent – you're in the top 10%." : topPct <= .25 ? "Strong – top quarter of the batch."
+    : topPct <= .5 ? "Above the median – solid base to build on." : topPct <= .75 ? "Below the median – there is clear room to climb."
+    : "In the lower quarter – this is recoverable with a focused plan.";
+
+  // ---- suggestions
+  if (ng) {
+    const gap = +(ng[1] - mark).toFixed(2);
+    lines.push(`<b>Next target: ${ng[0]}</b> – only <b>${gap}</b> marks away (${peersAbove} students are already at ${ng[0]} or above).`);
+  } else lines.push(`<b>You're at the top grade (${grade}).</b> Aim to stay consistent and help peers – teaching is great revision.`);
+  if (mark < 40) lines.push("Prioritise <b>passing basics</b>: re-do the lecture-quiz questions and tutorial problems you got wrong; book a consultation with your lecturer/instructor this week.");
+  else if (mark < mean) lines.push(`You're <b>${Math.abs(diff).toFixed(1)} marks below the average</b>. Review your midterm paper question by question and list which topics cost you the most marks – fix the top 2–3 first.`);
+  else lines.push(`You're <b>${diff.toFixed(1)} marks above the average</b>. Check where you still dropped marks – usually careless errors or one weak topic.`);
+  lines.push("Practise on <b>past papers / tutorials under timed conditions</b>, then compare against model answers.");
+  lines.push("For AI/ML topics: re-derive key ideas by hand (e.g. gradient descent, bias–variance, evaluation metrics) and <b>re-implement one algorithm from scratch</b> in Python.");
+  lines.push("Form a small <b>study group</b> and explain topics to each other; use lecturer consultation slots for anything still fuzzy.");
+  if (topPct > .5) lines.push("Make a <b>weekly plan</b>: 3 short sessions (45–60 min) beat one long cram, and finish with a self-test each time.");
+  lines.push(`<span class="muted">The midterm is 20% of the module, so you still have 80% to improve your overall result.</span>`);
+
+  show(`
+    <p class="hl">Mark ${mark} → Grade ${grade} · Rank ${rank}${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>
+    <div class="stats">
+      <div class="stat"><b>Top ${pct(topPct)}</b><span>of the batch</span></div>
+      <div class="stat"><b>${pct(beatPct)}</b><span>scored lower than you</span></div>
+      <div class="stat"><b>${inGrade}</b><span>students in grade ${grade} (${pct(inGrade/n)})</span></div>
+      <div class="stat"><b>${near}</b><span>within ±2 marks of you</span></div>
+      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}</b><span>vs average (${mean.toFixed(1)})</span></div>
+      <div class="stat"><b>${z>=0?"+":""}${z.toFixed(2)} σ</b><span>vs batch spread</span></div>
+    </div>
+    <p style="margin-top:14px"><b>${standing}</b></p>
+    <b>Suggestions</b><ul>${lines.map(l => `<li>${l}</li>`).join("")}</ul>`);
+  drawBars(grade);
+  state.grade = grade; state.page = 0; drawTable();
+}
+function show(html) { $("insights").classList.remove("hidden"); $("insights").innerHTML = html; }
+$("go").onclick = analyze;
+$("myMark").onkeydown = $("myReg").onkeydown = e => e.key === "Enter" && analyze();
+$("clear").onclick = () => {
+  $("myMark").value = $("myReg").value = ""; $("insights").classList.add("hidden");
+  state.mine = null; state.grade = "All"; drawBars(); drawTable();
+};
+drawTable();
+</script>
+</body>
+</html>

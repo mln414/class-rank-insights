@@ -19,6 +19,12 @@ The subject code, title, exam type, and weightage are **auto-detected** from the
 
 ## Run it
 
+### Option 1: In the Browser (Easiest – no Python required)
+1. Open `web/index.html` in Chrome/Edge (or run `cd web; python -m http.server 8000` and visit `http://localhost:8000`).
+2. **Drag & drop** your exam results PDF directly onto the page.
+3. The dashboard and analytics will generate instantly in your browser (100% private, client-side).
+
+### Option 2: Python CLI (Pre-generate data)
 ```bash
 pip install -r requirements.txt
 
@@ -32,10 +38,8 @@ python parse_pdf.py path/to/results.pdf --subject-code IT2011 --exam-type Midter
 python parse_pdf.py path/to/results.pdf --anonymize
 
 # Serve the dashboard:
-cd web && python -m http.server 8000                 # then open http://localhost:8000
+cd web; python -m http.server 8000                 # then open http://localhost:8000
 ```
-
-Or just open `web/index.html` directly in a browser (no server needed).
 
 ## Supported PDF format
 

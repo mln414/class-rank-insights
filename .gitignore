@@ -4,3 +4,5 @@ data/*
 web/data.js
 *.pdf
 __pycache__/
+*.code-workspace
+.pytest_cache/

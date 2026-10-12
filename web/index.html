@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IT2011 Midterm Analyzer</title>
+<title>Class Rank Insights</title>
+<meta name="description" content="Exam results dashboard – see your rank, grade breakdown, and personalised improvement suggestions.">
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--muted:#667085;--line:#e4e7ec;--accent:#4f46e5;--good:#12b76a;--warn:#f79009;--bad:#f04438}
 @media (prefers-color-scheme:dark){:root{--bg:#10131a;--card:#181c26;--text:#e8eaf0;--muted:#98a2b3;--line:#2a3040;--accent:#818cf8}}
@@ -29,11 +30,13 @@ th{cursor:pointer;color:var(--muted);font-weight:600;user-select:none}td.num{tex
 #insights ul{margin:8px 0 0;padding-left:20px}#insights li{margin:6px 0}
 .hl{font-size:18px;font-weight:600;margin:0 0 8px}.muted{color:var(--muted);font-size:13px}.hidden{display:none}
 tr.mine td{background:color-mix(in srgb,var(--good) 18%,transparent)}
+.no-data{padding:40px;text-align:center;color:var(--muted)}
+.badge{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;margin-left:8px}
 </style>
 </head>
 <body>
 <header>
-  <h1>IT2011 – Midterm Analyzer</h1>
+  <h1 id="pageTitle">Class Rank Insights</h1>
   <p id="meta">Loading…</p>
 </header>
 <main>
@@ -59,6 +62,7 @@ tr.mine td{background:color-mix(in srgb,var(--good) 18%,transparent)}
     <div class="row" style="margin-bottom:10px">
       <input id="q" placeholder="Search name or registration no…" style="flex:1;min-width:220px">
       <select id="batch"></select>
+      <select id="degreeFilter"></select>
       <label class="muted"><input type="checkbox" id="showAbsent"> include absent/blank</label>
     </div>
     <div class="chips" id="gradeChips" style="margin-bottom:12px"></div>
@@ -86,32 +90,59 @@ const GRADES = [
 const gradeOf = m => m == null ? "Absent" : GRADES.find(([,min]) => m >= min)[0];
 const nextGrade = m => { const i = GRADES.findIndex(([,min]) => m >= min); return i > 0 ? GRADES[i-1] : null; };
 
+// ---- Load data (supports both legacy window.MARKS and new window.DATA) --
+const DATA = window.DATA || null;
+const meta = DATA ? DATA.metadata : null;
+const all  = (DATA ? DATA.records : window.MARKS) || [];
+
+// ---- Resolve subject info from metadata or default -------------------
+const subjectCode  = meta?.subject_code  || "";
+const subjectTitle = meta?.subject_title || "";
+const examType     = meta?.exam_type     || "Assessment";
+const weightage    = meta?.weightage     || "";
+const examYear     = meta?.year          || "";
+
+// ---- Apply page title & header dynamically --------------------------
+const displayLabel = subjectCode
+  ? `${subjectCode}${subjectTitle && subjectTitle !== subjectCode ? " – " + subjectTitle : ""}`
+  : "Class Rank Insights";
+const examLabel = [examType, examYear].filter(Boolean).join(" ");
+const weightLabel = weightage ? ` (${weightage} weight)` : "";
+
+document.title = displayLabel + (examLabel ? " | " + examLabel : "");
+document.getElementById("pageTitle").textContent = `${displayLabel}${examLabel ? " · " + examLabel : ""}`;
+
 // ---- Data prep ---------------------------------------------------------
-const all = window.MARKS || [];
 const scored = all.filter(r => r.mark != null).sort((a,b) => b.mark - a.mark);
-// competition ranking: equal marks share a rank
 let last = null, rk = 0;
 scored.forEach((r,i) => { if (r.mark !== last) { rk = i + 1; last = r.mark; } r.rank = rk; });
 all.forEach(r => { r.grade = gradeOf(r.mark); if (r.mark == null) r.rank = null; });
 const marks = scored.map(r => r.mark);
-const mean = marks.reduce((a,b) => a+b, 0) / marks.length;
-const median = marks[Math.floor(marks.length/2)];
-const sd = Math.sqrt(marks.reduce((a,b) => a + (b-mean)**2, 0) / marks.length);
+
+if (all.length === 0) {
+  document.getElementById("meta").textContent = "No data loaded. Run parse_pdf.py first.";
+} else {
+  const absent = all.length - scored.length;
+  document.getElementById("meta").textContent =
+    `${all.length} students · ${scored.length} with marks · ${absent} absent/blank` +
+    (weightLabel ? " · Midterm" + weightLabel : "");
+}
+
+const mean   = marks.length ? marks.reduce((a,b) => a+b, 0) / marks.length : 0;
+const median = marks.length ? marks[Math.floor(marks.length/2)] : 0;
+const sd     = marks.length ? Math.sqrt(marks.reduce((a,b) => a + (b-mean)**2, 0) / marks.length) : 0;
 const pct = (x, f) => (x * 100).toFixed(f ?? 1) + "%";
 const $ = id => document.getElementById(id);
-
-document.title = "IT2011 Midterm Analyzer";
-$("meta").textContent = `${all.length} students · ${scored.length} with marks · ${all.length - scored.length} absent/blank`;
 
 // ---- Overview ----------------------------------------------------------
 $("stats").innerHTML = [
   ["Students", scored.length], ["Average", mean.toFixed(2)], ["Median", median.toFixed(2)],
-  ["Highest", marks[0]], ["Lowest", marks[marks.length-1]], ["Std dev", sd.toFixed(2)]
+  ["Highest", marks[0] ?? "—"], ["Lowest", marks[marks.length-1] ?? "—"], ["Std dev", sd.toFixed(2)]
 ].map(([l,v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
 
 const counts = {}; scored.forEach(r => counts[r.grade] = (counts[r.grade]||0) + 1);
 function drawBars(myGrade) {
-  const max = Math.max(...Object.values(counts));
+  const max = Math.max(...Object.values(counts), 1);
   $("bars").innerHTML = GRADES.map(([g]) => {
     const c = counts[g] || 0;
     return `<div class="bar ${g===myGrade?"me":""}"><b>${g}</b><i style="width:${c/max*100}%"></i><span>${c} (${pct(c/scored.length,0)})</span></div>`;
@@ -120,11 +151,18 @@ function drawBars(myGrade) {
 drawBars();
 
 // ---- Filters & table ---------------------------------------------------
-const state = { grade: "All", batch: "All", q: "", absent: false, sort: "rank", dir: 1, page: 0, mine: null };
+const state = { grade: "All", batch: "All", degree: "All", q: "", absent: false, sort: "rank", dir: 1, page: 0, mine: null };
 const PAGE = 50;
 
+// Batch filter
 $("batch").innerHTML = ["All", ...[...new Set(all.map(r => r.batch))].sort()]
   .map(b => `<option value="${b}">${b === "All" ? "All batches" : "Batch " + b}</option>`).join("");
+
+// Degree filter
+const degrees = [...new Set(all.map(r => r.degree || "").filter(Boolean))].sort();
+$("degreeFilter").innerHTML = ["All", ...degrees]
+  .map(d => `<option value="${d}">${d === "All" ? "All programmes" : d}</option>`).join("");
+
 function drawChips() {
   const items = ["All", ...GRADES.map(g => g[0]), "Absent"];
   $("gradeChips").innerHTML = items.map(g => {
@@ -137,6 +175,7 @@ function filtered() {
   let rows = all.filter(r =>
     (state.grade === "All" || r.grade === state.grade) &&
     (state.batch === "All" || r.batch === state.batch) &&
+    (state.degree === "All" || (r.degree || "") === state.degree) &&
     (state.absent || state.grade === "Absent" || r.mark != null) &&
     (!q || (r.name + r.reg).toLowerCase().replace(/\s+/g, "").includes(q)));
   const k = state.sort, d = state.dir;
@@ -164,6 +203,7 @@ function drawTable() {
 $("gradeChips").onclick = e => { const g = e.target.closest("[data-g]")?.dataset.g; if (g) { state.grade = g; state.page = 0; drawTable(); } };
 $("q").oninput = e => { state.q = e.target.value; state.page = 0; drawTable(); };
 $("batch").onchange = e => { state.batch = e.target.value; state.page = 0; drawTable(); };
+$("degreeFilter").onchange = e => { state.degree = e.target.value; state.page = 0; drawTable(); };
 $("showAbsent").onchange = e => { state.absent = e.target.checked; state.page = 0; drawTable(); };
 $("prev").onclick = () => { state.page--; drawTable(); };
 $("next").onclick = () => { state.page++; drawTable(); };
@@ -185,37 +225,44 @@ function analyze() {
 
   const grade = gradeOf(mark), n = scored.length;
   const higher = marks.filter(m => m > mark).length;
-  const same = marks.filter(m => m === mark).length;
-  const rank = higher + 1;
-  const below = marks.filter(m => m < mark).length;
-  const topPct = rank / n;                    // "top X%"
-  const beatPct = below / n;                  // percentile
+  const same   = marks.filter(m => m === mark).length;
+  const rank   = higher + 1;
+  const below  = marks.filter(m => m < mark).length;
+  const topPct = rank / n;
+  const beatPct = below / n;
   const inGrade = counts[grade] || 0;
   const near = marks.filter(m => Math.abs(m - mark) <= 2).length;
-  const z = (mark - mean) / sd;
+  const z    = sd > 0 ? (mark - mean) / sd : 0;
   const diff = mark - mean;
-  state.mine = me; state.mine = me || all.find(r => r.mark === mark) || null;
+  state.mine = me || all.find(r => r.mark === mark) || null;
 
-  const ng = nextGrade(mark), above = marks.filter(m => m > mark);
+  const ng = nextGrade(mark);
   const peersAbove = ng ? marks.filter(m => m >= ng[1]).length : 0;
   const lines = [];
-  const standing = topPct <= .1 ? "Excellent – you're in the top 10%." : topPct <= .25 ? "Strong – top quarter of the batch."
-    : topPct <= .5 ? "Above the median – solid base to build on." : topPct <= .75 ? "Below the median – there is clear room to climb."
+  const standing = topPct <= .1 ? "Excellent – you're in the top 10%."
+    : topPct <= .25 ? "Strong – top quarter of the batch."
+    : topPct <= .5  ? "Above the median – solid base to build on."
+    : topPct <= .75 ? "Below the median – there is clear room to climb."
     : "In the lower quarter – this is recoverable with a focused plan.";
 
-  // ---- suggestions
   if (ng) {
     const gap = +(ng[1] - mark).toFixed(2);
     lines.push(`<b>Next target: ${ng[0]}</b> – only <b>${gap}</b> marks away (${peersAbove} students are already at ${ng[0]} or above).`);
-  } else lines.push(`<b>You're at the top grade (${grade}).</b> Aim to stay consistent and help peers – teaching is great revision.`);
-  if (mark < 40) lines.push("Prioritise <b>passing basics</b>: re-do the lecture-quiz questions and tutorial problems you got wrong; book a consultation with your lecturer/instructor this week.");
-  else if (mark < mean) lines.push(`You're <b>${Math.abs(diff).toFixed(1)} marks below the average</b>. Review your midterm paper question by question and list which topics cost you the most marks – fix the top 2–3 first.`);
-  else lines.push(`You're <b>${diff.toFixed(1)} marks above the average</b>. Check where you still dropped marks – usually careless errors or one weak topic.`);
-  lines.push("Practise on <b>past papers / tutorials under timed conditions</b>, then compare against model answers.");
-  lines.push("For AI/ML topics: re-derive key ideas by hand (e.g. gradient descent, bias–variance, evaluation metrics) and <b>re-implement one algorithm from scratch</b> in Python.");
-  lines.push("Form a small <b>study group</b> and explain topics to each other; use lecturer consultation slots for anything still fuzzy.");
-  if (topPct > .5) lines.push("Make a <b>weekly plan</b>: 3 short sessions (45–60 min) beat one long cram, and finish with a self-test each time.");
-  lines.push(`<span class="muted">The midterm is 20% of the module, so you still have 80% to improve your overall result.</span>`);
+  } else {
+    lines.push(`<b>You're at the top grade (${grade}).</b> Aim to stay consistent and help peers.`);
+  }
+  if (mark < 40)
+    lines.push("Prioritise <b>passing basics</b>: revisit lecture materials and tutorial problems you got wrong; book a consultation with your lecturer this week.");
+  else if (mark < mean)
+    lines.push(`You're <b>${Math.abs(diff).toFixed(1)} marks below the average</b>. Review your paper question by question and identify the top 2–3 topics to fix first.`);
+  else
+    lines.push(`You're <b>${diff.toFixed(1)} marks above the average</b>. Check where you still dropped marks – usually careless errors or one weak topic.`);
+  lines.push("Practise on <b>past papers and tutorials under timed conditions</b>, then compare against model answers.");
+  lines.push("Form a small <b>study group</b> and explain topics to each other; use lecturer consultation slots for anything still unclear.");
+  if (topPct > .5)
+    lines.push("Make a <b>weekly revision plan</b>: 3 short focused sessions (45–60 min) beat one long cram; end each with a self-test.");
+  if (weightage)
+    lines.push(`<span class="muted">This assessment is worth <b>${weightage}</b> of the module – you still have the rest of the course to improve your overall result.</span>`);
 
   show(`
     <p class="hl">Mark ${mark} → Grade ${grade} · Rank ${rank}${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>

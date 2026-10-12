@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Class Rank Insights</title>
-<meta name="description" content="Exam results dashboard – upload results PDF, see your rank, grade breakdown, and personalised improvement suggestions.">
+<meta name="description" content="Exam results dashboard – upload results PDF, see your rank, score breakdown, and personalised improvement suggestions.">
 <style>
 :root {
   --bg: #f6f7f9;
@@ -100,7 +100,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .chip small { opacity: 0.75; margin-left: 5px; }
 
 .bars { display: grid; gap: 6px; }
-.bar { display: grid; grid-template-columns: 36px 1fr 65px; gap: 8px; align-items: center; font-size: 12px; }
+.bar { display: grid; grid-template-columns: 75px 1fr 65px; gap: 8px; align-items: center; font-size: 12px; }
 .bar i { display: block; height: 14px; border-radius: 4px; background: var(--accent); opacity: 0.55; }
 .bar.me i { opacity: 1; background: var(--good); }
 
@@ -181,7 +181,7 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
 
     <!-- Class overview -->
     <section class="card">
-      <h2>Class overview</h2>
+      <h2>Class overview <span id="overviewNote" class="muted" style="font-size:12px;font-weight:400;margin-left:6px"></span></h2>
       <div class="stats" id="stats"></div>
       <div class="bars" id="bars" style="margin-top:16px"></div>
     </section>
@@ -201,8 +201,11 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
       <div class="muted" id="count" style="margin-bottom:8px"></div>
       <div class="tbl"><table>
         <thead><tr>
-          <th data-k="rank">Rank</th><th data-k="reg">Reg. No</th><th data-k="name">Name</th>
-          <th data-k="mark" class="num">Mark</th><th data-k="grade">Grade</th>
+          <th data-k="rank">Rank</th>
+          <th data-k="reg">Reg. No</th>
+          <th data-k="name">Name</th>
+          <th data-k="mark" class="num">Mark (/100)</th>
+          <th data-k="score" class="num" id="colGradeOrScore">Weighted Score</th>
         </tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
@@ -224,11 +227,37 @@ if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
 }
 
-// ---- Grade scale -------------------------------------------------------
+// ---- Scales & Classifications ------------------------------------------
+const BANDS = [
+  { label: "90 – 100", min: 90, max: 100 },
+  { label: "80 – 89",  min: 80, max: 89.999 },
+  { label: "70 – 79",  min: 70, max: 79.999 },
+  { label: "60 – 69",  min: 60, max: 69.999 },
+  { label: "50 – 59",  min: 50, max: 59.999 },
+  { label: "40 – 49",  min: 40, max: 49.999 },
+  { label: "< 40",     min: 0,  max: 39.999 }
+];
+
 const GRADES = [
   ["A+",90],["A",85],["A-",80],["B+",75],["B",70],["B-",65],
   ["C+",60],["C",55],["C-",50],["D+",45],["D",40],["E",0]
 ];
+
+function isMidtermAssessment(meta) {
+  if (!meta) return true;
+  const exam = (meta.exam_type || "").toLowerCase();
+  const weight = (meta.weightage || "").trim();
+  if (exam.includes("mid") || exam.includes("test") || exam.includes("quiz") || exam.includes("assignment")) return true;
+  if (weight && weight !== "100%" && weight !== "100") return true;
+  return false;
+}
+
+const bandOf = m => {
+  if (m == null) return "Absent";
+  const b = BANDS.find(b => m >= b.min && m <= b.max);
+  return b ? b.label : "< 40";
+};
+
 const gradeOf = m => m == null ? "Absent" : GRADES.find(([,min]) => m >= min)[0];
 const nextGrade = m => { const i = GRADES.findIndex(([,min]) => m >= min); return i > 0 ? GRADES[i-1] : null; };
 const pct = (x, f) => (x * 100).toFixed(f ?? 1) + "%";
@@ -238,7 +267,7 @@ const $ = id => document.getElementById(id);
 let currentDataset = null;
 let scored = [], marks = [], counts = {};
 let mean = 0, median = 0, sd = 0;
-const state = { grade: "All", batch: "All", degree: "All", q: "", absent: false, sort: "rank", dir: 1, page: 0, mine: null };
+const state = { category: "All", batch: "All", degree: "All", q: "", absent: false, sort: "rank", dir: 1, page: 0, mine: null };
 const PAGE = 50;
 
 // ---- PDF Parsing Logic -------------------------------------------------
@@ -396,18 +425,20 @@ function loadDataset(dataset) {
     return;
   }
 
+  const isMidterm = isMidtermAssessment(meta);
+  const weightNum = parseFloat(meta.weightage) || 20;
+  const weightLabel = meta.weightage || `${weightNum}%`;
+
   // Header labels
   const subjectCode = meta.subject_code || "";
   const subjectTitle = meta.subject_title || "";
-  const examType = meta.exam_type || "Assessment";
-  const weightage = meta.weightage || "";
+  const examType = meta.exam_type || (isMidterm ? "Midterm" : "Final");
   const examYear = meta.year || "";
 
   const displayLabel = subjectCode
     ? `${subjectCode}${subjectTitle && subjectTitle !== subjectCode ? " – " + subjectTitle : ""}`
     : "Class Rank Insights";
   const examLabel = [examType, examYear].filter(Boolean).join(" ");
-  const weightLabel = weightage ? ` (${weightage} weight)` : "";
 
   document.title = displayLabel + (examLabel ? " | " + examLabel : "");
   $("pageTitle").textContent = `${displayLabel}${examLabel ? " · " + examLabel : ""}`;
@@ -416,13 +447,26 @@ function loadDataset(dataset) {
   scored = all.filter(r => r.mark != null).sort((a,b) => b.mark - a.mark);
   let last = null, rk = 0;
   scored.forEach((r,i) => { if (r.mark !== last) { rk = i + 1; last = r.mark; } r.rank = rk; });
-  all.forEach(r => { r.grade = gradeOf(r.mark); if (r.mark == null) r.rank = null; });
+
+  all.forEach(r => {
+    r.band = bandOf(r.mark);
+    r.grade = isMidterm ? null : gradeOf(r.mark);
+    if (r.mark != null && r.score == null) {
+      r.score = +(r.mark * weightNum / 100).toFixed(2);
+    }
+    if (r.mark == null) r.rank = null;
+  });
+
   marks = scored.map(r => r.mark);
 
   const absent = all.length - scored.length;
   $("meta").textContent =
     `${all.length} students · ${scored.length} with marks · ${absent} absent/blank` +
-    (weightLabel ? " · " + (examType || "Exam") + weightLabel : "");
+    (isMidterm ? ` · ${examType} (${weightLabel} weight – final grades not assigned)` : ` · ${examType}`);
+
+  $("overviewNote").textContent = isMidterm
+    ? `(${weightLabel} weight · score band distribution)`
+    : `(Final letter grade distribution)`;
 
   mean   = marks.length ? marks.reduce((a,b) => a+b, 0) / marks.length : 0;
   median = marks.length ? marks[Math.floor(marks.length/2)] : 0;
@@ -434,8 +478,12 @@ function loadDataset(dataset) {
     ["Highest", marks[0] ?? "—"], ["Lowest", marks[marks.length-1] ?? "—"], ["Std dev", sd.toFixed(2)]
   ].map(([l,v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
 
+  // Count distribution categories
   counts = {};
-  scored.forEach(r => counts[r.grade] = (counts[r.grade]||0) + 1);
+  scored.forEach(r => {
+    const cat = isMidterm ? r.band : r.grade;
+    counts[cat] = (counts[cat] || 0) + 1;
+  });
   drawBars();
 
   // Populate filters
@@ -446,7 +494,7 @@ function loadDataset(dataset) {
   $("degreeFilter").innerHTML = ["All", ...degrees]
     .map(d => `<option value="${d}">${d === "All" ? "All programmes" : d}</option>`).join("");
 
-  state.grade = "All";
+  state.category = "All";
   state.batch = "All";
   state.degree = "All";
   state.q = "";
@@ -461,37 +509,58 @@ function loadDataset(dataset) {
   $("btnExportJson").classList.remove("hidden");
 }
 
-function drawBars(myGrade) {
+function drawBars(myCategory) {
+  const isMidterm = isMidtermAssessment(currentDataset?.metadata);
+  const items = isMidterm ? BANDS.map(b => b.label) : GRADES.map(g => g[0]);
   const max = Math.max(...Object.values(counts), 1);
-  $("bars").innerHTML = GRADES.map(([g]) => {
-    const c = counts[g] || 0;
-    return `<div class="bar ${g===myGrade?"me":""}"><b>${g}</b><i style="width:${c/max*100}%"></i><span>${c} (${pct(c/scored.length,0)})</span></div>`;
+
+  $("bars").innerHTML = items.map(cat => {
+    const c = counts[cat] || 0;
+    return `<div class="bar ${cat === myCategory ? "me" : ""}">
+      <b>${cat}</b>
+      <i style="width:${(c / max) * 100}%"></i>
+      <span>${c} (${pct(c / scored.length, 0)})</span>
+    </div>`;
   }).join("");
 }
 
 function drawChips() {
   const all = currentDataset ? currentDataset.records : [];
-  const items = ["All", ...GRADES.map(g => g[0]), "Absent"];
-  $("gradeChips").innerHTML = items.map(g => {
-    const c = g === "All" ? all.length : all.filter(r => r.grade === g).length;
-    return `<button class="chip ${state.grade===g?"on":""}" data-g="${g}">${g}<small>${c}</small></button>`;
+  const isMidterm = isMidtermAssessment(currentDataset?.metadata);
+  const items = isMidterm
+    ? ["All", ...BANDS.map(b => b.label), "Absent"]
+    : ["All", ...GRADES.map(g => g[0]), "Absent"];
+
+  $("gradeChips").innerHTML = items.map(cat => {
+    const c = cat === "All"
+      ? all.length
+      : all.filter(r => (isMidterm ? r.band : r.grade) === cat).length;
+    return `<button class="chip ${state.category === cat ? "on" : ""}" data-cat="${cat}">${cat}<small>${c}</small></button>`;
   }).join("");
 }
 
 function filtered() {
   if (!currentDataset) return [];
   const all = currentDataset.records;
+  const isMidterm = isMidtermAssessment(currentDataset?.metadata);
   const q = state.q.toLowerCase().replace(/\s+/g, "");
-  let rows = all.filter(r =>
-    (state.grade === "All" || r.grade === state.grade) &&
-    (state.batch === "All" || r.batch === state.batch) &&
-    (state.degree === "All" || (r.degree || "") === state.degree) &&
-    (state.absent || state.grade === "Absent" || r.mark != null) &&
-    (!q || (r.name + r.reg).toLowerCase().replace(/\s+/g, "").includes(q)));
+
+  let rows = all.filter(r => {
+    const cat = isMidterm ? r.band : r.grade;
+    return (state.category === "All" || cat === state.category) &&
+      (state.batch === "All" || r.batch === state.batch) &&
+      (state.degree === "All" || (r.degree || "") === state.degree) &&
+      (state.absent || state.category === "Absent" || r.mark != null) &&
+      (!q || (r.name + r.reg).toLowerCase().replace(/\s+/g, "").includes(q));
+  });
+
   const k = state.sort, d = state.dir;
   rows.sort((a,b) => {
     let x = a[k], y = b[k];
-    if (k === "grade") { x = a.mark ?? -1; y = b.mark ?? -1; d === 1 && ([x,y] = [y,x]); }
+    if (k === "score" || k === "grade") {
+      x = a.score ?? a.mark ?? -1;
+      y = b.score ?? b.mark ?? -1;
+    }
     if (x == null) return 1; if (y == null) return -1;
     return (x > y ? 1 : x < y ? -1 : 0) * d;
   });
@@ -499,21 +568,42 @@ function filtered() {
 }
 
 function drawTable() {
+  const isMidterm = isMidtermAssessment(currentDataset?.metadata);
+  const weightNum = parseFloat(currentDataset?.metadata?.weightage) || 20;
+  const weightLabel = currentDataset?.metadata?.weightage || `${weightNum}%`;
+
+  $("colGradeOrScore").textContent = isMidterm ? `Weighted (${weightLabel})` : "Grade";
+
   const rows = filtered(), pages = Math.max(1, Math.ceil(rows.length / PAGE));
   state.page = Math.min(state.page, pages - 1);
   const slice = rows.slice(state.page * PAGE, (state.page + 1) * PAGE);
-  $("rows").innerHTML = slice.map(r => `<tr class="${r === state.mine ? "mine" : ""}">
-    <td>${r.rank ?? "–"}</td><td>${r.reg}</td><td>${r.name}</td>
-    <td class="num">${r.mark ?? "–"}</td><td><span class="pill">${r.grade}</span></td></tr>`).join("")
-    || `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
+
+  $("rows").innerHTML = slice.map(r => {
+    const pillContent = isMidterm
+      ? (r.score != null ? `${r.score} / ${weightNum}` : (r.mark != null ? `${(r.mark * weightNum / 100).toFixed(2)} / ${weightNum}` : "Absent"))
+      : (r.grade || "Absent");
+
+    return `<tr class="${r === state.mine ? "mine" : ""}">
+      <td>${r.rank ?? "–"}</td>
+      <td>${r.reg}</td>
+      <td>${r.name}</td>
+      <td class="num">${r.mark ?? "–"}</td>
+      <td class="num"><span class="pill ${r.mark == null ? 'muted' : ''}">${pillContent}</span></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
+
   $("count").textContent = `${rows.length} result${rows.length === 1 ? "" : "s"}`;
   $("page").textContent = `Page ${state.page + 1} / ${pages}`;
-  $("prev").disabled = state.page === 0; $("next").disabled = state.page >= pages - 1;
+  $("prev").disabled = state.page === 0;
+  $("next").disabled = state.page >= pages - 1;
   drawChips();
 }
 
 // ---- Table Event Handlers ----------------------------------------------
-$("gradeChips").onclick = e => { const g = e.target.closest("[data-g]")?.dataset.g; if (g) { state.grade = g; state.page = 0; drawTable(); } };
+$("gradeChips").onclick = e => {
+  const cat = e.target.closest("[data-cat]")?.dataset.cat;
+  if (cat) { state.category = cat; state.page = 0; drawTable(); }
+};
 $("q").oninput = e => { state.q = e.target.value; state.page = 0; drawTable(); };
 $("batch").onchange = e => { state.batch = e.target.value; state.page = 0; drawTable(); };
 $("degreeFilter").onchange = e => { state.degree = e.target.value; state.page = 0; drawTable(); };
@@ -528,80 +618,116 @@ document.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => {
 function analyze(markOverride, meOverride) {
   if (!currentDataset) return;
   const all = currentDataset.records;
+  const isMidterm = isMidtermAssessment(currentDataset?.metadata);
+  const weightNum = parseFloat(currentDataset?.metadata?.weightage) || 20;
+  const weightLabel = currentDataset?.metadata?.weightage || `${weightNum}%`;
+
   let mark = markOverride != null ? markOverride : parseFloat($("myMark").value);
   let me = meOverride || null;
   const reg = $("myReg").value.trim().toLowerCase().replace(/\s+/g, "");
+
   if (!meOverride && reg) {
     me = all.find(r => r.reg.toLowerCase().replace(/\s+/g, "") === reg);
     if (!me) return show(`<p class="muted">No student found matching <b>${$("myReg").value.trim()}</b>. Leave the reg. no. empty if you only want to analyze by mark.</p>`);
     if (me.mark == null) return show(`<p>Your entry has no mark (absent/blank).</p>`);
-    mark = me.mark; $("myMark").value = mark;
+    mark = me.mark;
+    $("myMark").value = mark;
   }
   if (isNaN(mark) || mark < 0 || mark > 100) return show(`<p>Enter a mark between 0 and 100.</p>`);
 
-  const grade = gradeOf(mark), n = scored.length;
+  const n = scored.length;
   const higher = marks.filter(m => m > mark).length;
   const same   = marks.filter(m => m === mark).length;
   const rank   = higher + 1;
   const below  = marks.filter(m => m < mark).length;
   const topPct = rank / n;
   const beatPct = below / n;
-  const inGrade = counts[grade] || 0;
+
+  const userCat = isMidterm ? bandOf(mark) : gradeOf(mark);
+  const inCat = counts[userCat] || 0;
   const near = marks.filter(m => Math.abs(m - mark) <= 2).length;
   const z    = sd > 0 ? (mark - mean) / sd : 0;
   const diff = mark - mean;
   state.mine = me || all.find(r => r.mark === mark) || null;
 
-  const ng = nextGrade(mark);
-  const peersAbove = ng ? marks.filter(m => m >= ng[1]).length : 0;
+  const weightedScore = me?.score ?? +(mark * weightNum / 100).toFixed(2);
   const lines = [];
-  const standing = topPct <= .1 ? "Excellent – you're in the top 10%."
-    : topPct <= .25 ? "Strong – top quarter of the batch."
-    : topPct <= .5  ? "Above the median – solid base to build on."
-    : topPct <= .75 ? "Below the median – there is clear room to climb."
-    : "In the lower quarter – this is recoverable with a focused plan.";
 
-  if (ng) {
-    const gap = +(ng[1] - mark).toFixed(2);
-    lines.push(`<b>Next target: ${ng[0]}</b> – only <b>${gap}</b> marks away (${peersAbove} students are already at ${ng[0]} or above).`);
+  const standing = topPct <= .1 ? "Excellent – you're in the top 10% of the batch."
+    : topPct <= .25 ? "Strong – top quarter of the batch."
+    : topPct <= .5  ? "Above the median – solid foundation to build on."
+    : topPct <= .75 ? "Below the median – clear room to improve in the final exam."
+    : "In the lower quarter – recoverable with a targeted study plan for the remaining assessments.";
+
+  if (isMidterm) {
+    const MILESTONES = [40, 50, 60, 65, 70, 75, 80, 85, 90, 95, 100];
+    const nextTarget = MILESTONES.find(m => m > mark);
+    if (nextTarget) {
+      const gap = +(nextTarget - mark).toFixed(2);
+      const peersAbove = marks.filter(m => m >= nextTarget).length;
+      const weightGain = +(gap * weightNum / 100).toFixed(2);
+      lines.push(`<b>Next milestone: ${nextTarget}/100</b> – only <b>${gap}</b> marks away (${peersAbove} students already at ${nextTarget}+). Reaching this adds <b>+${weightGain}</b> marks to your final module score.`);
+    } else {
+      lines.push(`<b>Outstanding! You scored in the top tier (${userCat}).</b> Maintain this standard for the remaining 80% of the module.`);
+    }
   } else {
-    lines.push(`<b>You're at the top grade (${grade}).</b> Aim to stay consistent and help peers.`);
+    const ng = nextGrade(mark);
+    if (ng) {
+      const gap = +(ng[1] - mark).toFixed(2);
+      const peersAbove = marks.filter(m => m >= ng[1]).length;
+      lines.push(`<b>Next target: ${ng[0]}</b> – only <b>${gap}</b> marks away (${peersAbove} students are already at ${ng[0]} or above).`);
+    } else {
+      lines.push(`<b>You're at the top grade (${userCat}).</b> Aim to stay consistent and help peers.`);
+    }
   }
+
   if (mark < 40)
-    lines.push("Prioritise <b>passing basics</b>: revisit lecture materials and tutorial problems you got wrong; book a consultation with your lecturer this week.");
+    lines.push("Prioritise <b>passing fundamentals</b>: revisit lecture notes and tutorial questions; book a consultation with your lecturer this week.");
   else if (mark < mean)
-    lines.push(`You're <b>${Math.abs(diff).toFixed(1)} marks below the average</b>. Review your paper question by question and identify the top 2–3 topics to fix first.`);
+    lines.push(`You're <b>${Math.abs(diff).toFixed(1)} marks below the average</b>. Review your paper question by question and fix the top 2–3 topics before the final exam.`);
   else
-    lines.push(`You're <b>${diff.toFixed(1)} marks above the average</b>. Check where you still dropped marks – usually careless errors or one weak topic.`);
+    lines.push(`You're <b>${diff.toFixed(1)} marks above average</b>. Double check careless mistakes to maximise your final assessment.`);
+
   lines.push("Practise on <b>past papers and tutorials under timed conditions</b>, then compare against model answers.");
-  lines.push("Form a small <b>study group</b> and explain topics to each other; use lecturer consultation slots for anything still unclear.");
-  if (topPct > .5)
-    lines.push("Make a <b>weekly revision plan</b>: 3 short focused sessions (45–60 min) beat one long cram; end each with a self-test.");
-  if (currentDataset?.metadata?.weightage)
-    lines.push(`<span class="muted">This assessment is worth <b>${currentDataset.metadata.weightage}</b> of the module – you still have the rest of the course to improve your overall result.</span>`);
+  lines.push("Form a small <b>study group</b> to explain tricky topics to peers; use lecturer consultation slots for anything still unclear.");
+
+  if (isMidterm) {
+    lines.push(`Remember: this midterm is only <b>${weightLabel}</b> of your module. The remaining <b>${100 - weightNum}%</b> gives you plenty of opportunity to raise your final outcome.`);
+  }
+
+  const headerHtml = isMidterm
+    ? `<p class="hl">Mark <b>${mark} / 100</b> · Contribution: <b>${weightedScore} / ${weightNum}</b> (${weightLabel} weight) · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>
+       <div style="background:color-mix(in srgb, var(--accent) 10%, transparent);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;font-size:13px;margin:8px 0 16px">
+         ℹ️ <b>Midterm Assessment (${weightLabel} weight)</b>: Letter grades (A+, B, etc.) are only awarded at the end of the semester after combining all components. Your score here contributes <b>${weightedScore} marks</b> out of ${weightNum} towards your final grade.
+       </div>`
+    : `<p class="hl">Mark ${mark} → Grade ${userCat} · Rank ${rank}${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>`;
 
   show(`
-    <p class="hl">Mark ${mark} → Grade ${grade} · Rank ${rank}${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>
+    ${headerHtml}
     <div class="stats">
       <div class="stat"><b>Top ${pct(topPct)}</b><span>of the batch</span></div>
       <div class="stat"><b>${pct(beatPct)}</b><span>scored lower than you</span></div>
-      <div class="stat"><b>${inGrade}</b><span>students in grade ${grade} (${pct(inGrade/n)})</span></div>
+      <div class="stat"><b>${inCat}</b><span>students in ${isMidterm ? "score range" : "grade"} ${userCat}</span></div>
       <div class="stat"><b>${near}</b><span>within ±2 marks of you</span></div>
-      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}</b><span>vs average (${mean.toFixed(1)})</span></div>
+      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}</b><span>vs class average (${mean.toFixed(1)})</span></div>
       <div class="stat"><b>${z>=0?"+":""}${z.toFixed(2)} σ</b><span>vs batch spread</span></div>
     </div>
     <p style="margin-top:14px"><b>${standing}</b></p>
-    <b>Suggestions</b><ul>${lines.map(l => `<li>${l}</li>`).join("")}</ul>`);
-  drawBars(grade);
-  state.grade = grade; state.page = 0; drawTable();
+    <b>Suggestions for the remaining module:</b><ul>${lines.map(l => `<li>${l}</li>`).join("")}</ul>`);
+
+  drawBars(userCat);
+  state.category = userCat;
+  state.page = 0;
+  drawTable();
 }
+
 function show(html) { $("insights").classList.remove("hidden"); $("insights").innerHTML = html; }
 $("go").onclick = () => analyze();
 $("myMark").addEventListener("keydown", e => { if (e.key === "Enter") analyze(); });
 $("myReg").addEventListener("keydown", e => { if (e.key === "Enter") analyze(); });
 $("clear").onclick = () => {
   $("myMark").value = $("myReg").value = ""; $("insights").classList.add("hidden");
-  state.mine = null; state.grade = "All"; drawBars(); drawTable();
+  state.mine = null; state.category = "All"; drawBars(); drawTable();
 };
 
 // ---- Click a table row to auto-analyse ---------------------------------

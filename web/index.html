@@ -202,6 +202,7 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
       <div class="tbl"><table>
         <thead><tr>
           <th data-k="rank">Rank</th>
+          <th data-k="topPct">Top %</th>
           <th data-k="reg">Reg. No</th>
           <th data-k="name">Name</th>
           <th data-k="mark" class="num">Mark (/100)</th>
@@ -446,7 +447,11 @@ function loadDataset(dataset) {
   // Data prep
   scored = all.filter(r => r.mark != null).sort((a,b) => b.mark - a.mark);
   let last = null, rk = 0;
-  scored.forEach((r,i) => { if (r.mark !== last) { rk = i + 1; last = r.mark; } r.rank = rk; });
+  scored.forEach((r,i) => {
+    if (r.mark !== last) { rk = i + 1; last = r.mark; }
+    r.rank = rk;
+    r.topPct = scored.length ? (rk / scored.length) : null;
+  });
 
   all.forEach(r => {
     r.band = bandOf(r.mark);
@@ -454,7 +459,10 @@ function loadDataset(dataset) {
     if (r.mark != null && r.score == null) {
       r.score = +(r.mark * weightNum / 100).toFixed(2);
     }
-    if (r.mark == null) r.rank = null;
+    if (r.mark == null) {
+      r.rank = null;
+      r.topPct = null;
+    }
   });
 
   marks = scored.map(r => r.mark);
@@ -468,14 +476,14 @@ function loadDataset(dataset) {
     ? `(${weightLabel} weight · score band distribution)`
     : `(Final letter grade distribution)`;
 
-  mean   = marks.length ? marks.reduce((a,b) => a+b, 0) / marks.length : 0;
-  median = marks.length ? marks[Math.floor(marks.length/2)] : 0;
-  sd     = marks.length ? Math.sqrt(marks.reduce((a,b) => a + (b-mean)**2, 0) / marks.length) : 0;
+  mean = marks.length ? marks.reduce((a,b) => a+b, 0) / marks.length : 0;
 
-  // Overview stats
+  // Overview stats (Median and Std dev removed)
   $("stats").innerHTML = [
-    ["Students", scored.length], ["Average", mean.toFixed(2)], ["Median", median.toFixed(2)],
-    ["Highest", marks[0] ?? "—"], ["Lowest", marks[marks.length-1] ?? "—"], ["Std dev", sd.toFixed(2)]
+    ["Students", scored.length],
+    ["Class Average", mean.toFixed(2)],
+    ["Highest Mark", marks[0] ?? "—"],
+    ["Lowest Mark", marks[marks.length-1] ?? "—"]
   ].map(([l,v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
 
   // Count distribution categories
@@ -557,7 +565,10 @@ function filtered() {
   const k = state.sort, d = state.dir;
   rows.sort((a,b) => {
     let x = a[k], y = b[k];
-    if (k === "score" || k === "grade") {
+    if (k === "topPct" || k === "rank") {
+      x = a.rank ?? 999999;
+      y = b.rank ?? 999999;
+    } else if (k === "score" || k === "grade") {
       x = a.score ?? a.mark ?? -1;
       y = b.score ?? b.mark ?? -1;
     }
@@ -583,14 +594,19 @@ function drawTable() {
       ? (r.score != null ? `${r.score} / ${weightNum}` : (r.mark != null ? `${(r.mark * weightNum / 100).toFixed(2)} / ${weightNum}` : "Absent"))
       : (r.grade || "Absent");
 
+    const topPctBadge = r.topPct != null
+      ? `<span class="pill" style="font-size:11px;font-weight:600">Top ${pct(r.topPct)}</span>`
+      : `<span class="muted">–</span>`;
+
     return `<tr class="${r === state.mine ? "mine" : ""}">
       <td>${r.rank ?? "–"}</td>
+      <td>${topPctBadge}</td>
       <td>${r.reg}</td>
       <td>${r.name}</td>
       <td class="num">${r.mark ?? "–"}</td>
       <td class="num"><span class="pill ${r.mark == null ? 'muted' : ''}">${pillContent}</span></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="muted">No matches.</td></tr>`;
 
   $("count").textContent = `${rows.length} result${rows.length === 1 ? "" : "s"}`;
   $("page").textContent = `Page ${state.page + 1} / ${pages}`;
@@ -646,18 +662,17 @@ function analyze(markOverride, meOverride) {
   const userCat = isMidterm ? bandOf(mark) : gradeOf(mark);
   const inCat = counts[userCat] || 0;
   const near = marks.filter(m => Math.abs(m - mark) <= 2).length;
-  const z    = sd > 0 ? (mark - mean) / sd : 0;
   const diff = mark - mean;
   state.mine = me || all.find(r => r.mark === mark) || null;
 
   const weightedScore = me?.score ?? +(mark * weightNum / 100).toFixed(2);
   const lines = [];
 
-  const standing = topPct <= .1 ? "Excellent – you're in the top 10% of the batch."
-    : topPct <= .25 ? "Strong – top quarter of the batch."
-    : topPct <= .5  ? "Above the median – solid foundation to build on."
-    : topPct <= .75 ? "Below the median – clear room to improve in the final exam."
-    : "In the lower quarter – recoverable with a targeted study plan for the remaining assessments.";
+  const standing = topPct <= .1 ? `Excellent – you are in the <b>Top ${pct(topPct)}</b> of the entire batch.`
+    : topPct <= .25 ? `Strong – you are in the <b>Top ${pct(topPct)}</b> (top quarter) of the batch.`
+    : topPct <= .5  ? `Above average – you are in the <b>Top ${pct(topPct)}</b> of the batch. Solid base to build on.`
+    : topPct <= .75 ? `You are in the <b>Top ${pct(topPct)}</b> of the batch – clear room to improve in the final exam.`
+    : `You are currently in the <b>Top ${pct(topPct)}</b> of the batch – recoverable with a targeted study plan for the remaining assessments.`;
 
   if (isMidterm) {
     const MILESTONES = [40, 50, 60, 65, 70, 75, 80, 85, 90, 95, 100];
@@ -696,21 +711,23 @@ function analyze(markOverride, meOverride) {
   }
 
   const headerHtml = isMidterm
-    ? `<p class="hl">Mark <b>${mark} / 100</b> · Contribution: <b>${weightedScore} / ${weightNum}</b> (${weightLabel} weight) · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>
+    ? `<p class="hl">You are in the <span style="color:var(--accent);font-size:20px;font-weight:700">Top ${pct(topPct)}</span> of the batch · Mark <b>${mark} / 100</b> · Contribution: <b>${weightedScore} / ${weightNum}</b> (${weightLabel}) · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>
        <div style="background:color-mix(in srgb, var(--accent) 10%, transparent);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;font-size:13px;margin:8px 0 16px">
          ℹ️ <b>Midterm Assessment (${weightLabel} weight)</b>: Letter grades (A+, B, etc.) are only awarded at the end of the semester after combining all components. Your score here contributes <b>${weightedScore} marks</b> out of ${weightNum} towards your final grade.
        </div>`
-    : `<p class="hl">Mark ${mark} → Grade ${userCat} · Rank ${rank}${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>`;
+    : `<p class="hl">You are in the <span style="color:var(--accent);font-size:20px;font-weight:700">Top ${pct(topPct)}</span> of the batch · Mark <b>${mark}</b> → Grade <b>${userCat}</b> · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>`;
 
   show(`
     ${headerHtml}
     <div class="stats">
-      <div class="stat"><b>Top ${pct(topPct)}</b><span>of the batch</span></div>
-      <div class="stat"><b>${pct(beatPct)}</b><span>scored lower than you</span></div>
-      <div class="stat"><b>${inCat}</b><span>students in ${isMidterm ? "score range" : "grade"} ${userCat}</span></div>
-      <div class="stat"><b>${near}</b><span>within ±2 marks of you</span></div>
-      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}</b><span>vs class average (${mean.toFixed(1)})</span></div>
-      <div class="stat"><b>${z>=0?"+":""}${z.toFixed(2)} σ</b><span>vs batch spread</span></div>
+      <div class="stat" style="border-color:var(--accent);background:color-mix(in srgb, var(--accent) 10%, var(--card))">
+        <b style="color:var(--accent);font-size:26px">Top ${pct(topPct)}</b>
+        <span style="font-weight:600">Your Batch Position</span>
+      </div>
+      <div class="stat"><b>${pct(beatPct)}</b><span>Scored lower than you</span></div>
+      <div class="stat"><b>${inCat}</b><span>In your ${isMidterm ? "score range" : "grade"} (${userCat})</span></div>
+      <div class="stat"><b>${near}</b><span>Within ±2 marks of you</span></div>
+      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}</b><span>vs Class average (${mean.toFixed(1)})</span></div>
     </div>
     <p style="margin-top:14px"><b>${standing}</b></p>
     <b>Suggestions for the remaining module:</b><ul>${lines.map(l => `<li>${l}</li>`).join("")}</ul>`);

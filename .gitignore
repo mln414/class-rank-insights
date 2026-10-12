@@ -1,0 +1,6 @@
+# Student data is personal information - never commit it
+data/*
+!data/.gitkeep
+web/data.js
+*.pdf
+__pycache__/

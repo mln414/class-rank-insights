@@ -94,6 +94,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .stat { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .stat b { display: block; font-size: 22px; font-weight: 700; }
 .stat span { font-size: 12px; color: var(--muted); }
+/* Hero result card */
+.hero-card { text-align: center; padding: 24px 20px 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--card)), var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 16px; margin-bottom: 16px; }
+.hero-top-pct { font-size: clamp(32px, 8vw, 52px); font-weight: 800; color: var(--accent); line-height: 1.1; letter-spacing: -1px; }
+.hero-sub { font-size: 13px; color: var(--muted); margin-top: 2px; margin-bottom: 18px; }
+.hero-badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.hero-badge { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 10px 18px; min-width: 90px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.hero-badge-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.hero-badge-value { font-size: 20px; font-weight: 700; color: var(--text); }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 13px; cursor: pointer; }
 .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -668,17 +676,34 @@ function analyze(markOverride, meOverride) {
   const weightedScore = me?.score ?? +(mark * weightNum / 100).toFixed(2);
 
 
-  const headerHtml = isMidterm
-    ? `<p class="hl">You are in the <span style="color:var(--accent);font-size:20px;font-weight:700">Top ${pct(topPct)}</span> of the batch · Mark <b>${mark} / 100</b> · Contribution: <b>${weightedScore} / ${weightNum}</b> (${weightLabel}) · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>`
-    : `<p class="hl">You are in the <span style="color:var(--accent);font-size:20px;font-weight:700">Top ${pct(topPct)}</span> of the batch · Mark <b>${mark}</b> → Grade <b>${userCat}</b> · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>`;
+  const rankLabel = same > 1 ? `${rank} <span style="font-size:12px;opacity:.7">(tied · ${same} students)</span>` : `${rank}`;
+  const extraBadge = isMidterm
+    ? `<div class="hero-badge">
+         <span class="hero-badge-label">Contribution</span>
+         <span class="hero-badge-value">${weightedScore} <span style="font-size:13px;opacity:.6">/ ${weightNum}</span></span>
+       </div>`
+    : `<div class="hero-badge">
+         <span class="hero-badge-label">Grade</span>
+         <span class="hero-badge-value">${userCat}</span>
+       </div>`;
 
   show(`
-    ${headerHtml}
-    <div class="stats">
-      <div class="stat" style="border-color:var(--accent);background:color-mix(in srgb, var(--accent) 10%, var(--card))">
-        <b style="color:var(--accent);font-size:26px">Top ${pct(topPct)}</b>
-        <span style="font-weight:600">Your Batch Position</span>
+    <div class="hero-card">
+      <div class="hero-top-pct">Top ${pct(topPct)}</div>
+      <div class="hero-sub">of ${n} students</div>
+      <div class="hero-badges">
+        <div class="hero-badge">
+          <span class="hero-badge-label">Mark</span>
+          <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></span>
+        </div>
+        ${extraBadge}
+        <div class="hero-badge">
+          <span class="hero-badge-label">Rank</span>
+          <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
+        </div>
       </div>
+    </div>
+    <div class="stats">
       <div class="stat"><b>${pct(beatPct)}</b><span>Scored lower than you</span></div>
       <div class="stat"><b>${inCat}</b><span>In your ${isMidterm ? "score range" : "grade"} (${userCat})</span></div>
       <div class="stat"><b>${near}</b><span>Within ±2 marks of you</span></div>

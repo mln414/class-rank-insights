@@ -666,55 +666,10 @@ function analyze(markOverride, meOverride) {
   state.mine = me || all.find(r => r.mark === mark) || null;
 
   const weightedScore = me?.score ?? +(mark * weightNum / 100).toFixed(2);
-  const lines = [];
 
-  const standing = topPct <= .1 ? `Excellent – you are in the <b>Top ${pct(topPct)}</b> of the entire batch.`
-    : topPct <= .25 ? `Strong – you are in the <b>Top ${pct(topPct)}</b> (top quarter) of the batch.`
-    : topPct <= .5  ? `Above average – you are in the <b>Top ${pct(topPct)}</b> of the batch. Solid base to build on.`
-    : topPct <= .75 ? `You are in the <b>Top ${pct(topPct)}</b> of the batch – clear room to improve in the final exam.`
-    : `You are currently in the <b>Top ${pct(topPct)}</b> of the batch – recoverable with a targeted study plan for the remaining assessments.`;
-
-  if (isMidterm) {
-    const MILESTONES = [40, 50, 60, 65, 70, 75, 80, 85, 90, 95, 100];
-    const nextTarget = MILESTONES.find(m => m > mark);
-    if (nextTarget) {
-      const gap = +(nextTarget - mark).toFixed(2);
-      const peersAbove = marks.filter(m => m >= nextTarget).length;
-      const weightGain = +(gap * weightNum / 100).toFixed(2);
-      lines.push(`<b>Next milestone: ${nextTarget}/100</b> – only <b>${gap}</b> marks away (${peersAbove} students already at ${nextTarget}+). Reaching this adds <b>+${weightGain}</b> marks to your final module score.`);
-    } else {
-      lines.push(`<b>Outstanding! You scored in the top tier (${userCat}).</b> Maintain this standard for the remaining 80% of the module.`);
-    }
-  } else {
-    const ng = nextGrade(mark);
-    if (ng) {
-      const gap = +(ng[1] - mark).toFixed(2);
-      const peersAbove = marks.filter(m => m >= ng[1]).length;
-      lines.push(`<b>Next target: ${ng[0]}</b> – only <b>${gap}</b> marks away (${peersAbove} students are already at ${ng[0]} or above).`);
-    } else {
-      lines.push(`<b>You're at the top grade (${userCat}).</b> Aim to stay consistent and help peers.`);
-    }
-  }
-
-  if (mark < 40)
-    lines.push("Prioritise <b>passing fundamentals</b>: revisit lecture notes and tutorial questions; book a consultation with your lecturer this week.");
-  else if (mark < mean)
-    lines.push(`You're <b>${Math.abs(diff).toFixed(1)} marks below the average</b>. Review your paper question by question and fix the top 2–3 topics before the final exam.`);
-  else
-    lines.push(`You're <b>${diff.toFixed(1)} marks above average</b>. Double check careless mistakes to maximise your final assessment.`);
-
-  lines.push("Practise on <b>past papers and tutorials under timed conditions</b>, then compare against model answers.");
-  lines.push("Form a small <b>study group</b> to explain tricky topics to peers; use lecturer consultation slots for anything still unclear.");
-
-  if (isMidterm) {
-    lines.push(`Remember: this midterm is only <b>${weightLabel}</b> of your module. The remaining <b>${100 - weightNum}%</b> gives you plenty of opportunity to raise your final outcome.`);
-  }
 
   const headerHtml = isMidterm
-    ? `<p class="hl">You are in the <span style="color:var(--accent);font-size:20px;font-weight:700">Top ${pct(topPct)}</span> of the batch · Mark <b>${mark} / 100</b> · Contribution: <b>${weightedScore} / ${weightNum}</b> (${weightLabel}) · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>
-       <div style="background:color-mix(in srgb, var(--accent) 10%, transparent);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;font-size:13px;margin:8px 0 16px">
-         ℹ️ <b>Midterm Assessment (${weightLabel} weight)</b>: Letter grades (A+, B, etc.) are only awarded at the end of the semester after combining all components. Your score here contributes <b>${weightedScore} marks</b> out of ${weightNum} towards your final grade.
-       </div>`
+    ? `<p class="hl">You are in the <span style="color:var(--accent);font-size:20px;font-weight:700">Top ${pct(topPct)}</span> of the batch · Mark <b>${mark} / 100</b> · Contribution: <b>${weightedScore} / ${weightNum}</b> (${weightLabel}) · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>`
     : `<p class="hl">You are in the <span style="color:var(--accent);font-size:20px;font-weight:700">Top ${pct(topPct)}</span> of the batch · Mark <b>${mark}</b> → Grade <b>${userCat}</b> · Rank <b>${rank}</b>${same>1?` (tied with ${same-1} other${same>2?"s":""})`:""} of ${n}</p>`;
 
   show(`
@@ -728,9 +683,7 @@ function analyze(markOverride, meOverride) {
       <div class="stat"><b>${inCat}</b><span>In your ${isMidterm ? "score range" : "grade"} (${userCat})</span></div>
       <div class="stat"><b>${near}</b><span>Within ±2 marks of you</span></div>
       <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}</b><span>vs Class average (${mean.toFixed(1)})</span></div>
-    </div>
-    <p style="margin-top:14px"><b>${standing}</b></p>
-    <b>Suggestions for the remaining module:</b><ul>${lines.map(l => `<li>${l}</li>`).join("")}</ul>`);
+    </div>`);
 
   drawBars(userCat);
   state.category = userCat;

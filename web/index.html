@@ -883,13 +883,7 @@ function analyze(markOverride, meOverride) {
         <span class="hero-badge-value">${gradeLabel}${statusLabel}</span>
       </div>`;
 
-    breakdownPanelHtml = `
-      <div class="breakdown-card" style="margin-top:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <b style="font-size:13px;color:var(--text)">📊 Course Total: ${totalRangeDisplay}</b>
-          <span class="muted" style="font-size:12px">${feContribDisplay} · ${caWeightVal}% CA / ${feWeightVal}% Final</span>
-        </div>
-      </div>`;
+    breakdownPanelHtml = "";
   } else {
     // In-Semester / Midterm Marksheet:
     const calcNeededFe = (targetTotal) => {

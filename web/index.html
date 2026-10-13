@@ -177,7 +177,16 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
   <div id="dashboardView" class="hidden" style="display:grid;gap:20px">
     <!-- How am I doing -->
     <section class="card">
-      <h2>📊 How am I doing?</h2>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h2 style="margin:0">📊 How am I doing?</h2>
+        <div id="caWeightBox" style="display:none;align-items:center;gap:6px;font-size:13px">
+          <span class="muted">Weighting:</span>
+          <select id="caWeightSelect" style="padding:4px 8px;font-size:12px;border-radius:6px">
+            <option value="50">50% CA · 50% Final (Standard)</option>
+            <option value="40">40% CA · 60% Final (Mathematics)</option>
+          </select>
+        </div>
+      </div>
       <div class="row">
         <input id="myMark" type="number" min="0" max="100" step="any" placeholder="Your mark (out of 100)" style="flex:1;min-width:180px">
         <input id="myReg" type="text" placeholder="…or registration no. (e.g. IT 25 1017 94)" style="flex:1;min-width:220px">
@@ -213,7 +222,7 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
           <th data-k="topPct">Top %</th>
           <th data-k="reg">Reg. No</th>
           <th data-k="name" id="thName">Name</th>
-          <th data-k="mark" class="num">Mark (/100)</th>
+          <th data-k="mark" class="num" id="colMark">Mark (/100)</th>
           <th data-k="score" class="num" id="colGradeOrScore">Weighted Score</th>
         </tr></thead>
         <tbody id="rows"></tbody>
@@ -261,6 +270,12 @@ function isMidtermAssessment(meta) {
   if (exam.includes("mid") || exam.includes("test") || exam.includes("quiz") || exam.includes("assignment")) return true;
   if (weight && weight !== "100%" && weight !== "100") return true;
   return false;
+}
+function isMathModule(meta) {
+  const code = (meta?.subject_code || "").toLowerCase();
+  const title = (meta?.subject_title || "").toLowerCase();
+  const combined = code + " " + title;
+  return /math|calculus|statist|probabil|discrete|algebra|quantitat|numerical/.test(combined);
 }
 
 const bandOf = m => {
@@ -499,6 +514,17 @@ function loadDataset(dataset) {
   document.title = displayLabel + (examLabel ? " | " + examLabel : "");
   $("pageTitle").textContent = `${displayLabel}${examLabel ? " · " + examLabel : ""}`;
 
+  if (!isMidterm) {
+    if ($("caWeightBox")) {
+      $("caWeightBox").style.display = "flex";
+      $("caWeightSelect").value = isMathModule(meta) ? "40" : "50";
+    }
+    if ($("colMark")) $("colMark").textContent = "CA Mark (/100)";
+  } else {
+    if ($("caWeightBox")) $("caWeightBox").style.display = "none";
+    if ($("colMark")) $("colMark").textContent = "Mark (/100)";
+  }
+
   // Data prep
   scored = all.filter(r => r.mark != null).sort((a,b) => b.mark - a.mark);
   let last = null, rk = 0;
@@ -644,6 +670,7 @@ function drawTable() {
   const weightNum = parseFloat(currentDataset?.metadata?.weightage) || 20;
   const weightLabel = currentDataset?.metadata?.weightage || `${weightNum}%`;
 
+  if ($("colMark")) $("colMark").textContent = isMidterm ? "Mark (/100)" : "CA Mark (/100)";
   $("colGradeOrScore").textContent = isMidterm ? `Weighted (${weightLabel})` : "Grade";
 
   const rows = filtered(), pages = Math.max(1, Math.ceil(rows.length / PAGE));
@@ -733,37 +760,117 @@ function analyze(markOverride, meOverride) {
   const diff = mark - mean;
   state.mine = me || all.find(r => r.mark === mark) || null;
 
-  const weightedScore = me?.score ?? +(mark * weightNum / 100).toFixed(2);
-
-
   const rankLabel = same > 1 ? `${rank} <span style="font-size:12px;opacity:.7">(tied · ${same} students)</span>` : `${rank}`;
   const gradeLabel = me?.grade || userCat;
   const statusLabel = me?.status ? ` <span style="font-size:13px;opacity:.7">(${me.status})</span>` : "";
-  const extraBadge = isMidterm
-    ? `<div class="hero-badge">
-         <span class="hero-badge-label">Contribution</span>
-         <span class="hero-badge-value">${weightedScore} <span style="font-size:13px;opacity:.6">/ ${weightNum}</span></span>
-       </div>`
-    : `<div class="hero-badge">
-         <span class="hero-badge-label">Grade</span>
-         <span class="hero-badge-value">${gradeLabel}${statusLabel}</span>
-       </div>`;
+
+  // Component breakdowns:
+  let heroBadgesHtml = "";
+  let breakdownPanelHtml = "";
+
+  if (isMidterm) {
+    const weightedScore = me?.score ?? +(mark * weightNum / 100).toFixed(2);
+    heroBadgesHtml = `
+      <div class="hero-badge">
+        <span class="hero-badge-label">Mark</span>
+        <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">Contribution</span>
+        <span class="hero-badge-value">${weightedScore} <span style="font-size:13px;opacity:.6">/ ${weightNum}</span></span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">Rank</span>
+        <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
+      </div>`;
+  } else {
+    const caWeightVal = parseInt($("caWeightSelect")?.value || (isMathModule(currentDataset?.metadata) ? 40 : 50), 10);
+    const feWeightVal = 100 - caWeightVal;
+    const wCa = caWeightVal / 100.0;
+    const wFe = feWeightVal / 100.0;
+    const caContrib = +(mark * wCa).toFixed(1);
+
+    let feScoreDisplay = "–";
+    let feContribDisplay = "–";
+    let totalRangeDisplay = "";
+
+    if (gradeLabel === "R" || (me?.status === "Fail" && mark >= 50)) {
+      feScoreDisplay = `<span style="color:#ef4444">&lt; 40 / 100</span>`;
+      feContribDisplay = `Did not meet final exam hurdle (&lt;40% pass rule)`;
+      totalRangeDisplay = `Repeat (R) · Final exam &lt; 40%`;
+    } else if (gradeLabel === "E" || (me?.status === "Fail" && mark < 50)) {
+      const feScoreMax = Math.max(0, Math.min(100, Math.round(Math.max(0, 39.9 - caContrib) / wFe)));
+      feScoreDisplay = `&lt; ${feScoreMax} / 100`;
+      feContribDisplay = `Contributed &lt; ${(feScoreMax * wFe).toFixed(1)} marks out of ${feWeightVal}`;
+      totalRangeDisplay = `Grade E (&lt; 40 combined marks)`;
+    } else {
+      const gIdx = GRADES.findIndex(([g]) => g === gradeLabel);
+      if (gIdx !== -1) {
+        const tMin = GRADES[gIdx][1];
+        const tMax = gIdx > 0 ? (GRADES[gIdx - 1][1] - 0.01) : 100;
+        const feContribMin = Math.max(0, +(tMin - caContrib).toFixed(1));
+        const feContribMax = Math.min(feWeightVal, +(tMax - caContrib).toFixed(1));
+        const feScoreMin = Math.max(0, Math.min(100, Math.round(feContribMin / wFe)));
+        const feScoreMax = Math.max(0, Math.min(100, Math.round(feContribMax / wFe)));
+
+        feScoreDisplay = `~${feScoreMin} – ${feScoreMax} <span style="font-size:13px;opacity:.6">/ 100</span>`;
+        feContribDisplay = `Contributed ~${feContribMin} – ${feContribMax} marks out of ${feWeightVal}`;
+        totalRangeDisplay = `Module total ~${tMin}–${Math.round(tMax)} / 100`;
+      }
+    }
+
+    heroBadgesHtml = `
+      <div class="hero-badge">
+        <span class="hero-badge-label">CA Mark (${caWeightVal}%)</span>
+        <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">Est. Final Exam (${feWeightVal}%)</span>
+        <span class="hero-badge-value">${feScoreDisplay}</span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">Grade</span>
+        <span class="hero-badge-value">${gradeLabel}${statusLabel}</span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">Rank</span>
+        <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
+      </div>`;
+
+    breakdownPanelHtml = `
+      <div style="background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:14px;text-align:left">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <b style="font-size:13px;color:var(--text)">📊 Score Breakdown (${caWeightVal}% CA + ${feWeightVal}% Final Exam)</b>
+          <span class="muted" style="font-size:12px">${caWeightVal === 40 ? "📐 Mathematics weighting (40% CA · 60% Final)" : "📘 Standard weighting (50% CA · 50% Final)"}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px">
+          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">Continuous Assessment (CA)</div>
+            <div style="font-size:22px;font-weight:800;color:var(--text);margin:4px 0">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></div>
+            <div style="font-size:12px;color:var(--muted)">Contributed <b>${caContrib} marks</b> out of ${caWeightVal}</div>
+          </div>
+          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">Estimated Final Exam</div>
+            <div style="font-size:22px;font-weight:800;color:var(--accent);margin:4px 0">${feScoreDisplay}</div>
+            <div style="font-size:12px;color:var(--muted)">${feContribDisplay}</div>
+          </div>
+          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">Overall Result</div>
+            <div style="font-size:22px;font-weight:800;color:var(--good);margin:4px 0">Grade ${gradeLabel} ${statusLabel}</div>
+            <div style="font-size:12px;color:var(--muted)">${totalRangeDisplay}</div>
+          </div>
+        </div>
+      </div>`;
+  }
 
   show(`
     <div class="hero-card">
       <div class="hero-top-pct">Top ${pct(topPct)}</div>
       <div class="hero-sub">of ${n} students</div>
       <div class="hero-badges">
-        <div class="hero-badge">
-          <span class="hero-badge-label">Mark</span>
-          <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></span>
-        </div>
-        ${extraBadge}
-        <div class="hero-badge">
-          <span class="hero-badge-label">Rank</span>
-          <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
-        </div>
+        ${heroBadgesHtml}
       </div>
+      ${breakdownPanelHtml}
     </div>
     <div class="stats">
       <div class="stat"><b>${pct(beatPct)}</b><span>Scored lower than you</span></div>
@@ -780,6 +887,11 @@ function analyze(markOverride, meOverride) {
 
 function show(html) { $("insights").classList.remove("hidden"); $("insights").innerHTML = html; }
 $("go").onclick = () => analyze();
+if ($("caWeightSelect")) {
+  $("caWeightSelect").onchange = () => {
+    if (!$("insights").classList.contains("hidden")) analyze();
+  };
+}
 $("myMark").addEventListener("keydown", e => { if (e.key === "Enter") analyze(); });
 $("myReg").addEventListener("keydown", e => { if (e.key === "Enter") analyze(); });
 $("clear").onclick = () => {

@@ -112,6 +112,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .bar i { display: block; height: 14px; border-radius: 4px; background: var(--accent); opacity: 0.55; }
 .bar.me i { opacity: 1; background: var(--good); }
 
+/* Breakdown & Panel Cards */
+.breakdown-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-top: 14px; text-align: left; }
+.breakdown-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.panel-box { padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.panel-box-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); letter-spacing: .05em; }
+.panel-box-val { font-size: 22px; font-weight: 800; color: var(--text); margin: 4px 0; }
+.panel-box-sub { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.notice-box { padding: 12px 16px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: 14px; }
+
 /* Table */
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
@@ -478,10 +487,11 @@ async function parsePdfFile(file, isAnonymize = false, onProgress = null) {
             idx = parseInt(md[1].replace(/,/g, ""), 10);
             reg = md[2];
             name = "";
-            // Format D: score is the assessment mark (out of max_mark)
+            // Format D: score is assessment mark out of max_mark, mark is normalized to 100
             const rawScore = parseFloat(md[3]);
-            mark = rawScore;
+            const maxM = metadata.max_mark || 20.0;
             score = rawScore;
+            mark = +(rawScore * 100 / maxM).toFixed(2);
           } else {
             const ma = rowRegexA.exec(l);
             if (ma) {
@@ -542,20 +552,21 @@ function loadDataset(dataset) {
   document.title = displayLabel + (examLabel ? " | " + examLabel : "");
   $("pageTitle").textContent = `${displayLabel}${examLabel ? " · " + examLabel : ""}`;
 
-  if (!isMidterm) {
-    if ($("caWeightBox")) {
-      $("caWeightBox").style.display = "flex";
-      if (!$("caWeightSelect").value || $("caWeightSelect").value === "custom") {
-        $("caWeightSelect").value = "50";
-        if ($("customCaBox")) $("customCaBox").style.display = "none";
-      }
+  // Always display CA / Final split options for ALL documents
+  if ($("caWeightBox")) {
+    $("caWeightBox").style.display = "flex";
+    const isMathModule = /probability|statistics|mathematics|calculus|discrete|algebra|quantitative|it2120|it1110/i.test(`${subjectCode} ${subjectTitle}`);
+    if (!$("caWeightSelect").dataset.userModified) {
+      $("caWeightSelect").value = isMathModule ? "40" : "50";
+      if ($("customCaBox")) $("customCaBox").style.display = "none";
     }
-    if ($("colMark")) $("colMark").textContent = "CA Mark (/100)";
-  } else {
-    if ($("caWeightBox")) $("caWeightBox").style.display = "none";
-    const mm = meta.max_mark || 100;
-    if ($("colMark")) $("colMark").textContent = `Mark (/${mm})`;
-    if ($("myMark")) { $("myMark").max = mm; $("myMark").placeholder = `Your mark (out of ${mm})`; }
+  }
+
+  const mm = meta.max_mark || 100;
+  if ($("colMark")) $("colMark").textContent = "CA Mark (/100)";
+  if ($("myMark")) {
+    $("myMark").max = 100;
+    $("myMark").placeholder = mm < 100 ? `Your mark (out of ${mm} or /100)` : "Your mark (out of 100)";
   }
 
   // Data prep
@@ -571,8 +582,7 @@ function loadDataset(dataset) {
     r.band = bandOf(r.mark);
     r.grade = isMidterm ? null : (r.grade || gradeOf(r.mark));
     if (r.mark != null && r.score == null) {
-      const mm = meta.max_mark || 100;
-      r.score = +(r.mark * weightNum / mm).toFixed(2);
+      r.score = +(r.mark * weightNum / 100).toFixed(2);
     }
     if (r.mark == null) {
       r.rank = null;
@@ -593,12 +603,18 @@ function loadDataset(dataset) {
 
   mean = marks.length ? marks.reduce((a,b) => a+b, 0) / marks.length : 0;
 
-  // Overview stats (Median and Std dev removed)
+  // Overview stats with dual scale support (normalized % and raw assessment mark)
+  const avgSub = mm < 100 ? `<span style="font-size:12px;opacity:.6;margin-left:4px">(${(mean * mm / 100).toFixed(1)}/${mm})</span>` : "";
+  const hiSub = mm < 100 && marks[0] != null ? `<span style="font-size:12px;opacity:.6;margin-left:4px">(${+(marks[0] * mm / 100).toFixed(1)}/${mm})</span>` : "";
+  const loSub = mm < 100 && marks[marks.length-1] != null ? `<span style="font-size:12px;opacity:.6;margin-left:4px">(${+(marks[marks.length-1] * mm / 100).toFixed(1)}/${mm})</span>` : "";
+
   $("stats").innerHTML = [
-    ["Students", scored.length],
-    ["Class Average", mean.toFixed(2)],
-    ["Highest Mark", marks[0] ?? "—"],
-    ["Lowest Mark", marks[marks.length-1] ?? "—"]
+    ["Total Students", all.length],
+    ["Scored Marks", scored.length],
+    ["Class Average", `${mean.toFixed(1)}%${avgSub}`],
+    ["Highest Mark", marks[0] != null ? `${marks[0]}%${hiSub}` : "—"],
+    ["Lowest Mark", marks[marks.length-1] != null ? `${marks[marks.length-1]}%${loSub}` : "—"],
+    ["Absent / Blank", absent]
   ].map(([l,v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
 
   // Count distribution categories
@@ -705,17 +721,16 @@ function drawTable() {
   const weightLabel = currentDataset?.metadata?.weightage || `${weightNum}%`;
 
   const _mm = parseFloat(currentDataset?.metadata?.max_mark) || 100;
-  if ($("colMark")) $("colMark").textContent = isMidterm ? `Mark (/${_mm})` : "CA Mark (/100)";
-  $("colGradeOrScore").textContent = isMidterm ? `Weighted (${weightLabel})` : "Grade";
+  if ($("colMark")) $("colMark").textContent = "CA Mark (/100)";
+  $("colGradeOrScore").textContent = isMidterm ? `Assessment (/${_mm})` : "Grade";
 
   const rows = filtered(), pages = Math.max(1, Math.ceil(rows.length / PAGE));
   state.page = Math.min(state.page, pages - 1);
   const slice = rows.slice(state.page * PAGE, (state.page + 1) * PAGE);
 
   $("rows").innerHTML = slice.map(r => {
-    const _tmm = parseFloat(currentDataset?.metadata?.max_mark) || 100;
     const pillContent = isMidterm
-      ? (r.score != null ? `${r.score} / ${weightNum}` : (r.mark != null ? `${(r.mark * weightNum / _tmm).toFixed(2)} / ${weightNum}` : "Absent"))
+      ? (r.score != null ? `${r.score} / ${_mm}` : (r.mark != null ? `${+(r.mark * _mm / 100).toFixed(2)} / ${_mm}` : "Absent"))
       : (r.grade || "Absent");
 
     const statusBadge = r.status
@@ -729,7 +744,7 @@ function drawTable() {
       <td>${r.rank ?? "–"}</td>
       <td>${r.reg}</td>
       <td>${nameCell}</td>
-      <td class="num">${r.mark ?? "–"}</td>
+      <td class="num">${r.mark != null ? r.mark + "%" : "–"}</td>
       <td class="num"><span class="pill ${r.mark == null ? 'muted' : ''}">${pillContent}</span></td>
     </tr>`;
   }).join("") || `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
@@ -761,8 +776,8 @@ function analyze(markOverride, meOverride) {
   if (!currentDataset) return;
   const all = currentDataset.records;
   const isMidterm = isMidtermAssessment(currentDataset?.metadata);
+  const maxMark = parseFloat(currentDataset?.metadata?.max_mark) || 100;
   const weightNum = parseFloat(currentDataset?.metadata?.weightage) || 20;
-  const weightLabel = currentDataset?.metadata?.weightage || `${weightNum}%`;
 
   let mark = markOverride != null ? markOverride : parseFloat($("myMark").value);
   let me = meOverride || null;
@@ -770,13 +785,21 @@ function analyze(markOverride, meOverride) {
 
   if (!meOverride && reg) {
     me = all.find(r => r.reg.toLowerCase().replace(/\s+/g, "") === reg);
-    if (!me) return show(`<p class="muted">No student found matching <b>${$("myReg").value.trim()}</b>. Leave the reg. no. empty if you only want to analyze by mark.</p>`);
-    if (me.mark == null) return show(`<p>Your entry has no mark (absent/blank).</p>`);
+    if (!me) return show(`<div class="notice-box muted">No student found matching <b>${$("myReg").value.trim()}</b>. Leave the registration number empty to analyze purely by mark.</div>`);
+    if (me.mark == null) return show(`<div class="notice-box muted">Student record found, but no mark was recorded (absent/blank).</div>`);
     mark = me.mark;
-    $("myMark").value = mark;
+    $("myMark").value = me.score != null && maxMark < 100 ? me.score : mark;
   }
-  const maxMark = parseFloat(currentDataset?.metadata?.max_mark) || 100;
-  if (isNaN(mark) || mark < 0 || mark > maxMark) return show(`<p>Enter a mark between 0 and ${maxMark}.</p>`);
+
+  // If user entered a raw mark out of maxMark (e.g. 9.5 when maxMark is 20):
+  if (!me && !isNaN(mark) && maxMark < 100 && mark <= maxMark) {
+    const rawInput = mark;
+    mark = +(rawInput * 100 / maxMark).toFixed(2);
+  }
+
+  if (isNaN(mark) || mark < 0 || mark > 100) {
+    return show(`<div class="notice-box muted">Please enter a valid mark between 0 and 100${maxMark < 100 ? ` (or between 0 and ${maxMark})` : ""}.</div>`);
+  }
 
   const n = scored.length;
   const higher = marks.filter(m => m > mark).length;
@@ -796,39 +819,28 @@ function analyze(markOverride, meOverride) {
   const gradeLabel = me?.grade || userCat;
   const statusLabel = me?.status ? ` <span style="font-size:13px;opacity:.7">(${me.status})</span>` : "";
 
-  // Component breakdowns:
+  // Continuous Assessment and Final Exam weights
+  const caWeightVal = getCaWeight();
+  const feWeightVal = 100 - caWeightVal;
+  const wCa = caWeightVal / 100.0;
+  const wFe = feWeightVal / 100.0;
+  const caContrib = +(mark * wCa).toFixed(1);
+
+  const rawScore = me?.score ?? (maxMark < 100 ? +(mark * maxMark / 100).toFixed(2) : mark);
+  const rawScoreSub = maxMark < 100 ? `<span style="font-size:12px;opacity:.65;margin-left:4px">(${rawScore}/${maxMark})</span>` : "";
+
+  const hasOfficialGrades = !isMidterm && GRADES.some(([g]) => g === gradeLabel);
+
   let heroBadgesHtml = "";
   let breakdownPanelHtml = "";
 
-  if (isMidterm) {
-    const _mxMk = parseFloat(currentDataset?.metadata?.max_mark) || 100;
-    const weightedScore = me?.score ?? +(mark * weightNum / _mxMk).toFixed(2);
-    heroBadgesHtml = `
-      <div class="hero-badge">
-        <span class="hero-badge-label">Mark</span>
-        <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ ${_mxMk}</span></span>
-      </div>
-      <div class="hero-badge">
-        <span class="hero-badge-label">Contribution</span>
-        <span class="hero-badge-value">${weightedScore} <span style="font-size:13px;opacity:.6">/ ${weightNum}</span></span>
-      </div>
-      <div class="hero-badge">
-        <span class="hero-badge-label">Rank</span>
-        <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
-      </div>`;
-  } else {
-    const caWeightVal = getCaWeight();
-    const feWeightVal = 100 - caWeightVal;
-    const wCa = caWeightVal / 100.0;
-    const wFe = feWeightVal / 100.0;
-    const caContrib = +(mark * wCa).toFixed(1);
-
+  if (hasOfficialGrades) {
     let feScoreDisplay = "–";
     let feContribDisplay = "–";
     let totalRangeDisplay = "";
 
     if (gradeLabel === "R" || (me?.status === "Fail" && mark >= 50)) {
-      feScoreDisplay = `<span style="color:#ef4444">&lt; 40 / 100</span>`;
+      feScoreDisplay = `<span style="color:var(--bad)">&lt; 40 / 100</span>`;
       feContribDisplay = `Did not meet final exam hurdle (&lt;40% pass rule)`;
       totalRangeDisplay = `Repeat (R) · Final exam &lt; 40%`;
     } else if (gradeLabel === "E" || (me?.status === "Fail" && mark < 50)) {
@@ -855,42 +867,167 @@ function analyze(markOverride, meOverride) {
     heroBadgesHtml = `
       <div class="hero-badge">
         <span class="hero-badge-label">CA Mark (${caWeightVal}%)</span>
-        <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></span>
+        <span class="hero-badge-value">${mark}% ${rawScoreSub}</span>
       </div>
       <div class="hero-badge">
         <span class="hero-badge-label">Est. Final Exam (${feWeightVal}%)</span>
         <span class="hero-badge-value">${feScoreDisplay}</span>
       </div>
       <div class="hero-badge">
-        <span class="hero-badge-label">Grade</span>
+        <span class="hero-badge-label">Final Grade</span>
         <span class="hero-badge-value">${gradeLabel}${statusLabel}</span>
       </div>
       <div class="hero-badge">
-        <span class="hero-badge-label">Rank</span>
+        <span class="hero-badge-label">Class Rank</span>
         <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
       </div>`;
 
     breakdownPanelHtml = `
-      <div style="background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:14px;text-align:left">
+      <div class="breakdown-card">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-          <b style="font-size:13px;color:var(--text)">📊 Score Breakdown (${caWeightVal}% CA + ${feWeightVal}% Final Exam)</b>
-          <span class="muted" style="font-size:12px">Selected split: ${caWeightVal}% CA · ${feWeightVal}% Final Exam</span>
+          <b style="font-size:14px;color:var(--text)">📊 Final Grade Analysis (${caWeightVal}% CA + ${feWeightVal}% Final Exam)</b>
+          <span class="muted" style="font-size:12px">Split: ${caWeightVal}% CA · ${feWeightVal}% Final Exam</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px">
-          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">Continuous Assessment (CA)</div>
-            <div style="font-size:22px;font-weight:800;color:var(--text);margin:4px 0">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></div>
-            <div style="font-size:12px;color:var(--muted)">Contributed <b>${caContrib} marks</b> out of ${caWeightVal}</div>
+        <div class="breakdown-grid">
+          <div class="panel-box">
+            <div class="panel-box-title">Continuous Assessment (CA)</div>
+            <div class="panel-box-val">${mark}% ${rawScoreSub}</div>
+            <div class="panel-box-sub">Contributed <b>${caContrib} marks</b> out of ${caWeightVal}</div>
           </div>
-          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">Estimated Final Exam</div>
-            <div style="font-size:22px;font-weight:800;color:var(--accent);margin:4px 0">${feScoreDisplay}</div>
-            <div style="font-size:12px;color:var(--muted)">${feContribDisplay}</div>
+          <div class="panel-box">
+            <div class="panel-box-title">Estimated Final Exam</div>
+            <div class="panel-box-val" style="color:var(--accent)">${feScoreDisplay}</div>
+            <div class="panel-box-sub">${feContribDisplay}</div>
           </div>
-          <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">Overall Result</div>
-            <div style="font-size:22px;font-weight:800;color:var(--good);margin:4px 0">Grade ${gradeLabel} ${statusLabel}</div>
-            <div style="font-size:12px;color:var(--muted)">${totalRangeDisplay}</div>
+          <div class="panel-box">
+            <div class="panel-box-title">Official Module Result</div>
+            <div class="panel-box-val" style="color:var(--good)">Grade ${gradeLabel} ${statusLabel}</div>
+            <div class="panel-box-sub">${totalRangeDisplay}</div>
+          </div>
+        </div>
+      </div>`;
+  } else {
+    // In-Semester / Midterm Marksheet:
+    // Compute minimum required marks in the final exam for each grade target
+    const calcNeededFe = (targetTotal) => {
+      const rawNeeded = (targetTotal - caContrib) / wFe;
+      return Math.max(40, Math.ceil(rawNeeded)); // Must satisfy 40% hurdle
+    };
+
+    const targetC = calcNeededFe(55);  // Grade C (Pass threshold in SLIIT)
+    const targetB = calcNeededFe(70);  // Grade B
+    const targetA = calcNeededFe(85);  // Grade A
+    const targetAplus = calcNeededFe(90); // Grade A+
+
+    heroBadgesHtml = `
+      <div class="hero-badge">
+        <span class="hero-badge-label">CA Mark</span>
+        <span class="hero-badge-value">${mark}% ${rawScoreSub}</span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">CA Points Earned</span>
+        <span class="hero-badge-value">${caContrib} <span style="font-size:13px;opacity:.6">/ ${caWeightVal}</span></span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">Final Hurdle</span>
+        <span class="hero-badge-value">&ge; 40 <span style="font-size:13px;opacity:.6">/ 100</span></span>
+      </div>
+      <div class="hero-badge">
+        <span class="hero-badge-label">Class Rank</span>
+        <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
+      </div>`;
+
+    const formatTarget = (score) => {
+      if (score > 100) return `<span style="color:var(--bad)">Unreachable (>100)</span>`;
+      return `<b>${score} / 100</b> <span style="font-size:11px;opacity:.75">(${+(score * wFe).toFixed(1)} pts)</span>`;
+    };
+
+    breakdownPanelHtml = `
+      <div class="breakdown-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+          <b style="font-size:14px;color:var(--text)">🎯 Course Marks &amp; Final Exam Target Planner</b>
+          <span class="pill" style="font-size:12px;font-weight:600;background:var(--accent);color:#fff;border:none">${caWeightVal}% CA · ${feWeightVal}% Final Exam</span>
+        </div>
+
+        <div class="breakdown-grid" style="margin-bottom:16px">
+          <div class="panel-box">
+            <div class="panel-box-title">CA Marks Earned</div>
+            <div class="panel-box-val" style="color:var(--accent)">${caContrib} <span style="font-size:14px;font-weight:500;color:var(--muted)">/ ${caWeightVal}</span></div>
+            <div class="panel-box-sub">Your CA mark is <b>${mark}%</b> ${rawScoreSub}. Contributes ${caContrib} pts to course total.</div>
+          </div>
+          <div class="panel-box">
+            <div class="panel-box-title">Final Exam Weight</div>
+            <div class="panel-box-val">${feWeightVal}% <span style="font-size:14px;font-weight:500;color:var(--muted)">of module</span></div>
+            <div class="panel-box-sub">Counts as <b>${feWeightVal} marks</b> towards your 100 overall course total.</div>
+          </div>
+          <div class="panel-box">
+            <div class="panel-box-title">Pass Hurdle Requirement</div>
+            <div class="panel-box-val" style="color:var(--warn)">&ge; 40 / 100</div>
+            <div class="panel-box-sub">⚠️ SLIIT Rule: You must score at least 40% in the Final Exam to pass, even if CA is high.</div>
+          </div>
+        </div>
+
+        <!-- Grade Targets Table -->
+        <div style="background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:10px">
+            📋 Final Exam Score Needed for Each Grade (Out of 100)
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px">
+            <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--line);text-align:center">
+              <div style="font-size:11px;color:var(--muted);font-weight:600">PASS (C · 55%)</div>
+              <div style="font-size:15px;margin-top:4px">${formatTarget(targetC)}</div>
+            </div>
+            <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--line);text-align:center">
+              <div style="font-size:11px;color:var(--muted);font-weight:600">CREDIT (B · 70%)</div>
+              <div style="font-size:15px;margin-top:4px">${formatTarget(targetB)}</div>
+            </div>
+            <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--line);text-align:center">
+              <div style="font-size:11px;color:var(--muted);font-weight:600">DISTINCTION (A · 85%)</div>
+              <div style="font-size:15px;margin-top:4px">${formatTarget(targetA)}</div>
+            </div>
+            <div style="background:var(--card);padding:10px;border-radius:8px;border:1px solid var(--line);text-align:center">
+              <div style="font-size:11px;color:var(--muted);font-weight:600">HIGH DISTINCTION (A+ · 90%)</div>
+              <div style="font-size:15px;margin-top:4px">${formatTarget(targetAplus)}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive What-If Simulator -->
+        <div id="whatIfBox" data-ca-contrib="${caContrib}" style="background:var(--card);border:1px solid color-mix(in srgb, var(--accent) 30%, var(--line));border-radius:12px;padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:18px">🎛️</span>
+              <b style="font-size:13px;color:var(--text)">Interactive "What-If" Final Exam Simulator</b>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="muted" style="font-size:12px">Projected Final Exam Score:</span>
+              <input id="whatIfInput" type="number" min="0" max="100" value="65" style="width:65px;padding:4px 8px;font-size:14px;font-weight:700;text-align:center" oninput="window.updateWhatIf(this.value)">
+              <span style="font-size:13px;font-weight:600">/ 100</span>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+            <span style="font-size:12px;color:var(--muted)">0</span>
+            <input id="whatIfSlider" type="range" min="0" max="100" value="65" style="flex:1;accent-color:var(--accent);cursor:pointer" oninput="window.updateWhatIf(this.value)">
+            <span style="font-size:12px;color:var(--muted)">100</span>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px;padding:12px 14px;background:var(--bg);border-radius:10px;border:1px solid var(--line);align-items:center">
+            <div>
+              <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">Final Exam Pts</div>
+              <div id="whatIfFePoints" style="font-size:18px;font-weight:700;color:var(--accent)">39.0 marks (out of ${feWeightVal})</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">Course Total</div>
+              <div id="whatIfTotal" style="font-size:18px;font-weight:700;color:var(--text)">${+(caContrib + 65 * wFe).toFixed(1)} / 100</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">Projected Grade</div>
+              <div id="whatIfGrade" style="font-size:18px;font-weight:800;color:var(--good)">Grade C+</div>
+            </div>
+          </div>
+          <div id="whatIfHurdleMsg" style="font-size:12px;margin-top:10px;font-weight:500">
+            <span style="color:var(--good)">✅ Passes the 40% hurdle rule! Projected course result: <b>${+(caContrib + 65 * wFe).toFixed(1)} / 100</b></span>
           </div>
         </div>
       </div>`;
@@ -899,7 +1036,7 @@ function analyze(markOverride, meOverride) {
   show(`
     <div class="hero-card">
       <div class="hero-top-pct">Top ${pct(topPct)}</div>
-      <div class="hero-sub">of ${n} students</div>
+      <div class="hero-sub">of ${n} scored students</div>
       <div class="hero-badges">
         ${heroBadgesHtml}
       </div>
@@ -909,19 +1046,63 @@ function analyze(markOverride, meOverride) {
       <div class="stat"><b>${pct(beatPct)}</b><span>Scored lower than you</span></div>
       <div class="stat"><b>${inCat}</b><span>In your ${isMidterm ? "score range" : "grade"} (${userCat})</span></div>
       <div class="stat"><b>${near}</b><span>Within ±2 marks of you</span></div>
-      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}</b><span>vs Class average (${mean.toFixed(1)})</span></div>
+      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}%</b><span>vs Class average (${mean.toFixed(1)}%)</span></div>
     </div>`);
 
   drawBars(userCat);
   state.category = userCat;
   state.page = 0;
   drawTable();
+
+  // Initialize What-If calculations if the simulator is mounted
+  if ($("whatIfInput")) {
+    window.updateWhatIf($("whatIfInput").value);
+  }
 }
+
+window.updateWhatIf = function(feVal) {
+  feVal = Math.max(0, Math.min(100, parseFloat(feVal) || 0));
+  if ($("whatIfSlider")) $("whatIfSlider").value = feVal;
+  if ($("whatIfInput")) $("whatIfInput").value = feVal;
+
+  const caW = getCaWeight();
+  const feW = 100 - caW;
+  const wF = feW / 100.0;
+  const cContrib = parseFloat($("whatIfBox")?.dataset.caContrib) || 0;
+  const fePoints = +(feVal * wF).toFixed(1);
+  const total = +(cContrib + fePoints).toFixed(1);
+
+  if ($("whatIfFePoints")) $("whatIfFePoints").textContent = `${fePoints} marks (out of ${feW})`;
+  if ($("whatIfTotal")) $("whatIfTotal").textContent = `${total} / 100`;
+
+  let pGrade = "E";
+  let hurdleMet = feVal >= 40;
+  if (!hurdleMet) {
+    pGrade = "R";
+  } else {
+    for (const [g, min] of GRADES) {
+      if (total >= min) { pGrade = g; break; }
+    }
+  }
+
+  if ($("whatIfGrade")) {
+    $("whatIfGrade").textContent = `Grade ${pGrade}`;
+    $("whatIfGrade").style.color = pGrade === "R" || pGrade === "E" ? "var(--bad)" : "var(--good)";
+  }
+  if ($("whatIfHurdleMsg")) {
+    if (!hurdleMet) {
+      $("whatIfHurdleMsg").innerHTML = `<span style="color:var(--bad)">⚠️ Final exam score &lt; 40 hurdle rule not met. Result is Repeat (R) regardless of CA marks.</span>`;
+    } else {
+      $("whatIfHurdleMsg").innerHTML = `<span style="color:var(--good)">✅ Passes the 40% hurdle rule! Projected course result: <b>${total} / 100</b></span>`;
+    }
+  }
+};
 
 function show(html) { $("insights").classList.remove("hidden"); $("insights").innerHTML = html; }
 $("go").onclick = () => analyze();
 if ($("caWeightSelect")) {
   $("caWeightSelect").onchange = () => {
+    $("caWeightSelect").dataset.userModified = "true";
     if ($("customCaBox")) {
       $("customCaBox").style.display = $("caWeightSelect").value === "custom" ? "inline-flex" : "none";
     }
@@ -930,6 +1111,7 @@ if ($("caWeightSelect")) {
 }
 if ($("customCaInput")) {
   $("customCaInput").oninput = () => {
+    $("caWeightSelect").dataset.userModified = "true";
     if (!$("insights").classList.contains("hidden")) analyze();
   };
 }
@@ -940,7 +1122,6 @@ $("clear").onclick = () => {
   state.mine = null; state.category = "All"; drawBars(); drawTable();
 };
 
-// ---- Click a table row to auto-analyse ---------------------------------
 $("rows").addEventListener("click", e => {
   const tr = e.target.closest("tr");
   if (!tr) return;

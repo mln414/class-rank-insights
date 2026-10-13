@@ -140,3 +140,15 @@ def test_metadata_format_d_weightage_inferred():
     assert meta["max_mark"] == 20.0
     assert meta["weightage"] == "20%"
     assert meta["exam_type"] == "Midterm"
+
+
+def test_format_d_mark_normalized_to_100():
+    """Format D raw score out of max_mark (e.g. 9.5 / 20) normalizes mark to 100 (47.5)."""
+    from parse_pdf import ROW_D
+    m = ROW_D.match("1 IT 23 1724 32 9.5")
+    assert m is not None
+    score = float(m.group("score"))
+    max_m = 20.0
+    norm_mark = round((score * 100.0 / max_m), 2)
+    assert score == 9.5
+    assert norm_mark == 47.5

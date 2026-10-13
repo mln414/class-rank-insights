@@ -162,11 +162,13 @@ def parse(pdf_path: Path, override_meta: dict = None):
                 grade = gd.get("grade")
                 status = gd.get("status")
 
-                # Format D: score IS the assessment mark (out of max_mark); derive mark from it
+                # Format D: score IS the assessment mark (out of max_mark); normalize mark to 100
                 if m is md:
                     max_m = metadata.get("max_mark", 20.0) or 20.0
                     if score is not None:
-                        mark = score  # keep original (out of max_mark), used for ranking
+                        raw_score = score
+                        mark = round((raw_score * 100.0 / max_m), 2)
+                        score = raw_score
                     name = ""
                     grade = None
                     status = None

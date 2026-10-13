@@ -359,6 +359,11 @@ function extractMetadata(firstPageLines, fileName = "") {
     }
   }
 
+  // If max_mark < 100 and no explicit weightage, infer it
+  if (meta.max_mark < 100 && !meta.weightage) {
+    meta.weightage = meta.max_mark + "%";
+  }
+
   // Fallback to filename
   if (!meta.subject_code && fileName) {
     const fnMatch = /([A-Z]{2,4}\s*\d{4})/i.exec(fileName);
@@ -434,6 +439,8 @@ async function parsePdfFile(file, isAnonymize = false, onProgress = null) {
   const rowRegexB_noMark = /^([\d,]+)\s+([A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+([A-Z][+-]?|[A-Z]{1,2})\s+(Pass|Fail)\s*$/i;
   // Format C (With name, mark, grade, status): e.g. "1 IT 23 1724 32 Silva A. 66.6 C Pass"
   const rowRegexC = /^([\d,]+)\s+([A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+(.+?)\s+(\d+(?:\.\d+)?|-)\s+([A-Z][+-]?|[A-Z]{1,2})(?:\s+(Pass|Fail))?\s*$/i;
+  // Format D (Direct weighted score, no name): e.g. "1,223 IT 25 1020 57 10.83"
+  const rowRegexD = /^([\d,]+)\s+([A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+(\d+(?:\.\d+)?)\s*$/;
   // Format A (With name, mark, score): e.g. "1,234 IT 25 1017 94 Jayasundara R.H. 82.66 16.532"
   const rowRegexA = /^([\d,]+)\s+([A-Z]{2,4}\s\d{2}\s\d{4}\s\d{2})\s+(.+?)(?:\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?))?\s*$/;
 
@@ -466,15 +473,26 @@ async function parsePdfFile(file, isAnonymize = false, onProgress = null) {
           grade = mc[5].toUpperCase();
           status = mc[6] || null;
         } else {
-          const ma = rowRegexA.exec(l);
-          if (ma) {
-            idx = parseInt(ma[1].replace(/,/g, ""), 10);
-            reg = ma[2];
-            name = ma[3].trim();
-            mark = ma[4] !== undefined ? parseFloat(ma[4]) : null;
-            score = ma[5] !== undefined ? parseFloat(ma[5]) : null;
+          const md = rowRegexD.exec(l);
+          if (md) {
+            idx = parseInt(md[1].replace(/,/g, ""), 10);
+            reg = md[2];
+            name = "";
+            // Format D: score is the assessment mark (out of max_mark)
+            const rawScore = parseFloat(md[3]);
+            mark = rawScore;
+            score = rawScore;
           } else {
-            continue;
+            const ma = rowRegexA.exec(l);
+            if (ma) {
+              idx = parseInt(ma[1].replace(/,/g, ""), 10);
+              reg = ma[2];
+              name = ma[3].trim();
+              mark = ma[4] !== undefined ? parseFloat(ma[4]) : null;
+              score = ma[5] !== undefined ? parseFloat(ma[5]) : null;
+            } else {
+              continue;
+            }
           }
         }
       }
@@ -535,7 +553,9 @@ function loadDataset(dataset) {
     if ($("colMark")) $("colMark").textContent = "CA Mark (/100)";
   } else {
     if ($("caWeightBox")) $("caWeightBox").style.display = "none";
-    if ($("colMark")) $("colMark").textContent = "Mark (/100)";
+    const mm = meta.max_mark || 100;
+    if ($("colMark")) $("colMark").textContent = `Mark (/${mm})`;
+    if ($("myMark")) { $("myMark").max = mm; $("myMark").placeholder = `Your mark (out of ${mm})`; }
   }
 
   // Data prep
@@ -551,7 +571,8 @@ function loadDataset(dataset) {
     r.band = bandOf(r.mark);
     r.grade = isMidterm ? null : (r.grade || gradeOf(r.mark));
     if (r.mark != null && r.score == null) {
-      r.score = +(r.mark * weightNum / 100).toFixed(2);
+      const mm = meta.max_mark || 100;
+      r.score = +(r.mark * weightNum / mm).toFixed(2);
     }
     if (r.mark == null) {
       r.rank = null;
@@ -683,7 +704,8 @@ function drawTable() {
   const weightNum = parseFloat(currentDataset?.metadata?.weightage) || 20;
   const weightLabel = currentDataset?.metadata?.weightage || `${weightNum}%`;
 
-  if ($("colMark")) $("colMark").textContent = isMidterm ? "Mark (/100)" : "CA Mark (/100)";
+  const _mm = parseFloat(currentDataset?.metadata?.max_mark) || 100;
+  if ($("colMark")) $("colMark").textContent = isMidterm ? `Mark (/${_mm})` : "CA Mark (/100)";
   $("colGradeOrScore").textContent = isMidterm ? `Weighted (${weightLabel})` : "Grade";
 
   const rows = filtered(), pages = Math.max(1, Math.ceil(rows.length / PAGE));
@@ -691,8 +713,9 @@ function drawTable() {
   const slice = rows.slice(state.page * PAGE, (state.page + 1) * PAGE);
 
   $("rows").innerHTML = slice.map(r => {
+    const _tmm = parseFloat(currentDataset?.metadata?.max_mark) || 100;
     const pillContent = isMidterm
-      ? (r.score != null ? `${r.score} / ${weightNum}` : (r.mark != null ? `${(r.mark * weightNum / 100).toFixed(2)} / ${weightNum}` : "Absent"))
+      ? (r.score != null ? `${r.score} / ${weightNum}` : (r.mark != null ? `${(r.mark * weightNum / _tmm).toFixed(2)} / ${weightNum}` : "Absent"))
       : (r.grade || "Absent");
 
     const statusBadge = r.status
@@ -752,7 +775,8 @@ function analyze(markOverride, meOverride) {
     mark = me.mark;
     $("myMark").value = mark;
   }
-  if (isNaN(mark) || mark < 0 || mark > 100) return show(`<p>Enter a mark between 0 and 100.</p>`);
+  const maxMark = parseFloat(currentDataset?.metadata?.max_mark) || 100;
+  if (isNaN(mark) || mark < 0 || mark > maxMark) return show(`<p>Enter a mark between 0 and ${maxMark}.</p>`);
 
   const n = scored.length;
   const higher = marks.filter(m => m > mark).length;
@@ -777,11 +801,12 @@ function analyze(markOverride, meOverride) {
   let breakdownPanelHtml = "";
 
   if (isMidterm) {
-    const weightedScore = me?.score ?? +(mark * weightNum / 100).toFixed(2);
+    const _mxMk = parseFloat(currentDataset?.metadata?.max_mark) || 100;
+    const weightedScore = me?.score ?? +(mark * weightNum / _mxMk).toFixed(2);
     heroBadgesHtml = `
       <div class="hero-badge">
         <span class="hero-badge-label">Mark</span>
-        <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ 100</span></span>
+        <span class="hero-badge-value">${mark} <span style="font-size:13px;opacity:.6">/ ${_mxMk}</span></span>
       </div>
       <div class="hero-badge">
         <span class="hero-badge-label">Contribution</span>

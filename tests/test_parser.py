@@ -104,3 +104,39 @@ def test_metadata_final_exam_format():
     assert meta["subject_title"] == "Data Structures and Algorithms"
     assert meta["exam_type"] in ("Final", "General Examination")
     assert meta["year"] == "2026"
+
+
+def test_row_format_d_with_score():
+    """Format D: direct assessment mark (out of N), no name column."""
+    from parse_pdf import ROW_D
+    m = ROW_D.match("1,223 IT 25 1020 57 10.83")
+    assert m is not None
+    assert m.group("idx") == "1,223"
+    assert m.group("reg") == "IT 25 1020 57"
+    assert float(m.group("score")) == 10.83
+
+
+def test_row_format_d_integer_and_zero():
+    """Format D handles integer scores and zero marks."""
+    from parse_pdf import ROW_D
+    m_int = ROW_D.match("1,226 IT 25 1020 60 20")
+    assert m_int and float(m_int.group("score")) == 20.0
+
+    m_zero = ROW_D.match("1,242 IT 25 1020 77 0")
+    assert m_zero and float(m_zero.group("score")) == 0.0
+
+
+def test_metadata_format_d_weightage_inferred():
+    """When max_mark < 100 and no brackets, weightage is inferred."""
+    header = (
+        "Sri Lanka Institute of Information Technology\n"
+        "Probability and Statistics - IT2120\n"
+        "Midterm - 2026\n"
+        "All - Institute All - Specialization All - Regular\n"
+        "Assessment Mark Out of 20\n"
+    )
+    meta = extract_metadata(header, Path("IT2120_Midterm.pdf"))
+    assert meta["subject_code"] == "IT2120"
+    assert meta["max_mark"] == 20.0
+    assert meta["weightage"] == "20%"
+    assert meta["exam_type"] == "Midterm"

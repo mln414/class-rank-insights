@@ -39,6 +39,12 @@ ROW_C = re.compile(
     re.I,
 )
 
+# Format D (Direct weighted score, no name): e.g. "1,223 IT 25 1020 57 10.83"
+# Used when column header is "Assessment Mark Out of N" (N < 100)
+ROW_D = re.compile(
+    r"^(?P<idx>[\d,]+)\s+(?P<reg>[A-Z]{2,4}\s+\d{2}\s+\d{4}\s+\d{2})\s+(?P<score>\d+(?:\.\d+)?)\s*$"
+)
+
 # Format A (Midterm with name, mark, score): e.g. "1,234 IT 25 1017 94 Jayasundara R.H. 82.66 16.532"
 ROW_A = re.compile(
     r"^(?P<idx>[\d,]+)\s+(?P<reg>[A-Z]{2,4}\s\d{2}\s\d{4}\s\d{2})\s+(?P<name>.+?)"
@@ -95,6 +101,11 @@ def extract_metadata(header_text: str, pdf_path: Path) -> dict:
             if mw.group("weight"):
                 meta["weightage"] = mw.group("weight").strip()
 
+    # If max_mark < 100 and weightage not explicitly given, infer it
+    # If max_mark < 100 and weightage not explicitly given, infer it
+    if meta["max_mark"] < 100 and not meta["weightage"]:
+        meta["weightage"] = f"{int(meta['max_mark'])}%"
+
     # Fallback to filename if subject code not detected from header
     if not meta["subject_code"]:
         fn_match = re.search(r"([A-Z]{2,4}\s*\d{4})", pdf_path.stem, re.I)
@@ -127,8 +138,9 @@ def parse(pdf_path: Path, override_meta: dict = None):
                 mb = ROW_B.match(l)
                 mb_no = ROW_B_NOMARK.match(l) if not mb else None
                 mc = ROW_C.match(l) if not (mb or mb_no) else None
-                ma = ROW_A.match(l) if not (mb or mb_no or mc) else None
-                m = mb or mb_no or mc or ma
+                md = ROW_D.match(l) if not (mb or mb_no or mc) else None
+                ma = ROW_A.match(l) if not (mb or mb_no or mc or md) else None
+                m = mb or mb_no or mc or md or ma
                 if not m:
                     continue
 
@@ -149,6 +161,15 @@ def parse(pdf_path: Path, override_meta: dict = None):
 
                 grade = gd.get("grade")
                 status = gd.get("status")
+
+                # Format D: score IS the assessment mark (out of max_mark); derive mark from it
+                if m is md:
+                    max_m = metadata.get("max_mark", 20.0) or 20.0
+                    if score is not None:
+                        mark = score  # keep original (out of max_mark), used for ranking
+                    name = ""
+                    grade = None
+                    status = None
 
                 item = {
                     "no": int(m.group("idx").replace(",", "")),

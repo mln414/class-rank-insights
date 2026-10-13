@@ -179,12 +179,19 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
     <section class="card">
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
         <h2 style="margin:0">📊 How am I doing?</h2>
-        <div id="caWeightBox" style="display:none;align-items:center;gap:6px;font-size:13px">
-          <span class="muted">Weighting:</span>
-          <select id="caWeightSelect" style="padding:4px 8px;font-size:12px;border-radius:6px">
-            <option value="50">50% CA · 50% Final (Standard)</option>
-            <option value="40">40% CA · 60% Final (Mathematics)</option>
+        <div id="caWeightBox" style="display:none;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap">
+          <span style="font-weight:600;color:var(--text)">CA / Final Split:</span>
+          <select id="caWeightSelect" style="padding:4px 10px;font-size:12px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text)">
+            <option value="50">50% CA / 50% Final Exam (Standard)</option>
+            <option value="40">40% CA / 60% Final Exam (Mathematics & Quantitative)</option>
+            <option value="30">30% CA / 70% Final Exam</option>
+            <option value="60">60% CA / 40% Final Exam</option>
+            <option value="custom">Custom split…</option>
           </select>
+          <span id="customCaBox" style="display:none;align-items:center;gap:4px">
+            <input id="customCaInput" type="number" min="1" max="99" value="50" style="width:60px;padding:3px 6px;font-size:12px">
+            <span class="muted" style="font-size:12px">% CA</span>
+          </span>
         </div>
       </div>
       <div class="row">
@@ -219,7 +226,6 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
       <div class="tbl"><table>
         <thead><tr>
           <th data-k="rank">Rank</th>
-          <th data-k="topPct">Top %</th>
           <th data-k="reg">Reg. No</th>
           <th data-k="name" id="thName">Name</th>
           <th data-k="mark" class="num" id="colMark">Mark (/100)</th>
@@ -271,11 +277,15 @@ function isMidtermAssessment(meta) {
   if (weight && weight !== "100%" && weight !== "100") return true;
   return false;
 }
-function isMathModule(meta) {
-  const code = (meta?.subject_code || "").toLowerCase();
-  const title = (meta?.subject_title || "").toLowerCase();
-  const combined = code + " " + title;
-  return /math|calculus|statist|probabil|discrete|algebra|quantitat|numerical/.test(combined);
+function getCaWeight() {
+  const sel = $("caWeightSelect")?.value;
+  if (sel === "custom") {
+    const customVal = parseFloat($("customCaInput")?.value);
+    if (!isNaN(customVal) && customVal > 0 && customVal < 100) return customVal;
+    return 50;
+  }
+  const parsed = parseFloat(sel);
+  return !isNaN(parsed) ? parsed : 50;
 }
 
 const bandOf = m => {
@@ -517,7 +527,10 @@ function loadDataset(dataset) {
   if (!isMidterm) {
     if ($("caWeightBox")) {
       $("caWeightBox").style.display = "flex";
-      $("caWeightSelect").value = isMathModule(meta) ? "40" : "50";
+      if (!$("caWeightSelect").value || $("caWeightSelect").value === "custom") {
+        $("caWeightSelect").value = "50";
+        if ($("customCaBox")) $("customCaBox").style.display = "none";
+      }
     }
     if ($("colMark")) $("colMark").textContent = "CA Mark (/100)";
   } else {
@@ -682,10 +695,6 @@ function drawTable() {
       ? (r.score != null ? `${r.score} / ${weightNum}` : (r.mark != null ? `${(r.mark * weightNum / 100).toFixed(2)} / ${weightNum}` : "Absent"))
       : (r.grade || "Absent");
 
-    const topPctBadge = r.topPct != null
-      ? `<span class="pill" style="font-size:11px;font-weight:600">Top ${pct(r.topPct)}</span>`
-      : `<span class="muted">–</span>`;
-
     const statusBadge = r.status
       ? `<span class="pill" style="font-size:11px;font-weight:600;margin-left:4px;${r.status === 'Pass' ? 'color:#10b981;border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.08)' : 'color:#ef4444;border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)'}">${r.status}</span>`
       : "";
@@ -695,13 +704,12 @@ function drawTable() {
 
     return `<tr class="${r === state.mine ? "mine" : ""}">
       <td>${r.rank ?? "–"}</td>
-      <td>${topPctBadge}</td>
       <td>${r.reg}</td>
       <td>${nameCell}</td>
       <td class="num">${r.mark ?? "–"}</td>
       <td class="num"><span class="pill ${r.mark == null ? 'muted' : ''}">${pillContent}</span></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="6" class="muted">No matches.</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
 
   $("count").textContent = `${rows.length} result${rows.length === 1 ? "" : "s"}`;
   $("page").textContent = `Page ${state.page + 1} / ${pages}`;
@@ -784,7 +792,7 @@ function analyze(markOverride, meOverride) {
         <span class="hero-badge-value">${rankLabel} <span style="font-size:13px;opacity:.6">/ ${n}</span></span>
       </div>`;
   } else {
-    const caWeightVal = parseInt($("caWeightSelect")?.value || (isMathModule(currentDataset?.metadata) ? 40 : 50), 10);
+    const caWeightVal = getCaWeight();
     const feWeightVal = 100 - caWeightVal;
     const wCa = caWeightVal / 100.0;
     const wFe = feWeightVal / 100.0;
@@ -841,7 +849,7 @@ function analyze(markOverride, meOverride) {
       <div style="background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:14px;text-align:left">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
           <b style="font-size:13px;color:var(--text)">📊 Score Breakdown (${caWeightVal}% CA + ${feWeightVal}% Final Exam)</b>
-          <span class="muted" style="font-size:12px">${caWeightVal === 40 ? "📐 Mathematics weighting (40% CA · 60% Final)" : "📘 Standard weighting (50% CA · 50% Final)"}</span>
+          <span class="muted" style="font-size:12px">Selected split: ${caWeightVal}% CA · ${feWeightVal}% Final Exam</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px">
           <div style="padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
@@ -889,6 +897,14 @@ function show(html) { $("insights").classList.remove("hidden"); $("insights").in
 $("go").onclick = () => analyze();
 if ($("caWeightSelect")) {
   $("caWeightSelect").onchange = () => {
+    if ($("customCaBox")) {
+      $("customCaBox").style.display = $("caWeightSelect").value === "custom" ? "inline-flex" : "none";
+    }
+    if (!$("insights").classList.contains("hidden")) analyze();
+  };
+}
+if ($("customCaInput")) {
+  $("customCaInput").oninput = () => {
     if (!$("insights").classList.contains("hidden")) analyze();
   };
 }
@@ -903,8 +919,8 @@ $("clear").onclick = () => {
 $("rows").addEventListener("click", e => {
   const tr = e.target.closest("tr");
   if (!tr) return;
-  const regCell = tr.cells[2]?.textContent?.trim();
-  const markCell = parseFloat(tr.cells[4]?.textContent);
+  const regCell = tr.cells[1]?.textContent?.trim();
+  const markCell = parseFloat(tr.cells[3]?.textContent);
   if (!regCell || regCell === "–") return;
   $("myReg").value = regCell;
   if (!isNaN(markCell)) { $("myMark").value = markCell; }

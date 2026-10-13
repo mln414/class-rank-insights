@@ -95,7 +95,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .stat b { display: block; font-size: 22px; font-weight: 700; }
 .stat span { font-size: 12px; color: var(--muted); }
 /* Hero result card */
-.hero-card { text-align: center; padding: 24px 20px 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--card)), var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 16px; margin-bottom: 16px; }
+.hero-card { text-align: center; padding: 24px 20px 18px; background: var(--card); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--card)), var(--card)); border: 1px solid var(--line); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 16px; margin-bottom: 16px; }
 .hero-top-pct { font-size: clamp(32px, 8vw, 52px); font-weight: 800; color: var(--accent); line-height: 1.1; letter-spacing: -1px; }
 .hero-sub { font-size: 13px; color: var(--muted); margin-top: 2px; margin-bottom: 18px; }
 .hero-badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
@@ -140,6 +140,7 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
 .hidden { display: none !important; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 12px; margin-left: 8px; font-weight: normal; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas-pro@latest/dist/html2canvas-pro.min.js"></script>
 </head>
 <body>
 
@@ -150,7 +151,7 @@ tbody tr.mine td { background: color-mix(in srgb, var(--good) 18%, transparent);
   </div>
   <div class="header-actions">
     <button class="ghost" id="btnUploadNew">📁 Upload PDF</button>
-    <button class="ghost hidden" id="btnExportJson">💾 Export JSON</button>
+    <button class="ghost hidden" id="btnSaveImage">📸 Save as Image</button>
   </div>
 </header>
 
@@ -643,7 +644,7 @@ function loadDataset(dataset) {
   // Show dashboard, hide upload card
   $("uploadSection").classList.add("hidden");
   $("dashboardView").classList.remove("hidden");
-  $("btnExportJson").classList.remove("hidden");
+  $("btnSaveImage").classList.remove("hidden");
 }
 
 function drawBars(myCategory) {
@@ -988,19 +989,40 @@ function analyze(markOverride, meOverride) {
       </div>`;
   }
 
+  const meta = currentDataset?.metadata || {};
+  const subjectCode = meta.subject_code || "";
+  const subjectTitle = meta.subject_title || "";
+  const examType = meta.exam_type || "";
+  const examYear = meta.year || "";
+  const displaySubject = subjectCode ? `${subjectCode}${subjectTitle && subjectTitle !== subjectCode ? " – " + subjectTitle : ""}` : "Class Rank Insights";
+  const displayExam = [examType, examYear].filter(Boolean).join(" ");
+  const studentHeader = me?.reg ? `${me.reg}${me?.name ? ` · ${me.name}` : ""}` : (mark != null ? `Mark: ${mark}%` : "");
+
   show(`
-    <div class="hero-card">
-      <div class="hero-top-pct" style="margin-bottom:14px">Top ${pct(topPct)}</div>
-      <div class="hero-badges">
-        ${heroBadgesHtml}
+    <div id="analysisCard" style="background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 2px 10px rgba(0,0,0,0.03)">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding-bottom:12px;margin-bottom:14px;border-bottom:1px solid var(--line)">
+        <div>
+          <div style="font-weight:700;font-size:15px;color:var(--text)">${displaySubject}</div>
+          <div class="muted" style="font-size:12px">${displayExam || "Performance Analytics"}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;font-size:13px;color:var(--text)">${studentHeader}</div>
+          <div class="muted" style="font-size:11px">Class Rank Insights</div>
+        </div>
       </div>
-      ${breakdownPanelHtml}
-    </div>
-    <div class="stats">
-      <div class="stat"><b>${pct(beatPct)}</b><span>Scored lower than you</span></div>
-      <div class="stat"><b>${inCat}</b><span>In your ${isMidterm ? "score range" : "grade"} (${userCat})</span></div>
-      <div class="stat"><b>${near}</b><span>Within ±2 marks of you</span></div>
-      <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}%</b><span>vs Class average (${mean.toFixed(1)}%)</span></div>
+      <div class="hero-card">
+        <div class="hero-top-pct" style="margin-bottom:14px">Top ${pct(topPct)}</div>
+        <div class="hero-badges">
+          ${heroBadgesHtml}
+        </div>
+        ${breakdownPanelHtml}
+      </div>
+      <div class="stats">
+        <div class="stat"><b>${pct(beatPct)}</b><span>Scored lower than you</span></div>
+        <div class="stat"><b>${inCat}</b><span>In your ${isMidterm ? "score range" : "grade"} (${userCat})</span></div>
+        <div class="stat"><b>${near}</b><span>Within ±2 marks of you</span></div>
+        <div class="stat"><b>${diff>=0?"+":""}${diff.toFixed(1)}%</b><span>vs Class average (${mean.toFixed(1)}%)</span></div>
+      </div>
     </div>`);
 
   drawBars(userCat);
@@ -1153,16 +1175,47 @@ $("btnUploadNew").onclick = () => {
   }
 };
 
-// Export JSON button
-$("btnExportJson").onclick = () => {
+// Save Analysis as Image button
+$("btnSaveImage").onclick = async () => {
   if (!currentDataset) return;
-  const blob = new Blob([JSON.stringify(currentDataset, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${currentDataset.metadata.subject_code || "exam"}_marks.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const insightsEl = $("insights");
+  if (!insightsEl || insightsEl.classList.contains("hidden") || !insightsEl.innerHTML.trim()) {
+    alert("Please enter your mark, registration number, or click a student in the table first to generate your analysis card!");
+    $("myMark")?.focus();
+    return;
+  }
+
+  const captureTarget = $("analysisCard") || insightsEl;
+  const btn = $("btnSaveImage");
+  const origText = btn.innerHTML;
+  btn.innerHTML = "⏳ Saving...";
+  btn.disabled = true;
+
+  try {
+    if (typeof html2canvas === "undefined") {
+      throw new Error("Image export library is loading. Please check your internet connection or try again in a moment.");
+    }
+    const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const canvas = await html2canvas(captureTarget, {
+      backgroundColor: isDark ? "#181c26" : "#ffffff",
+      scale: 2,
+      useCORS: true,
+      logging: false
+    });
+    const a = document.createElement("a");
+    const meta = currentDataset?.metadata || {};
+    const code = (meta.subject_code || "class_rank").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const reg = state.mine?.reg ? `_${state.mine.reg.replace(/[^a-zA-Z0-9]/g, "")}` : "";
+    a.download = `${code}${reg}_insights.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  } catch (err) {
+    console.error("Export image error:", err);
+    alert("Could not export image: " + err.message);
+  } finally {
+    btn.innerHTML = origText;
+    btn.disabled = false;
+  }
 };
 
 // Cached / Demo button
